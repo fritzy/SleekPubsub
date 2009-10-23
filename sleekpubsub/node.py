@@ -3,12 +3,13 @@ from sleekxmpp.xmlstream.matcher.xmlmask import MatchXMLMask
 from sleekxmpp.xmlstream.handler.callback import Callback
 from xml.etree import cElementTree as ET
 import uuid
+import logging
 
 class Subscription(object):
 	def __init__(self, node):
 		self.jid = None
 		self.subid = None
-		self.config
+		self.config = None
 		self.node = node
 	
 	def set(self, jid, subid, config):
@@ -71,10 +72,11 @@ class Item(object):
 	def getwho(self):
 		return self.who
 
+
 class BaseNode(object):
 	nodetype = 'leaf'
 
-	def __init__(self, pubsub, db, name, config, owner=None):
+	def __init__(self, pubsub, db, name, config=None, owner=None):
 		self.new_owner = owner
 		self.pubsub = pubsub
 		self.xmpp = self.pubsub.xmpp
@@ -88,16 +90,19 @@ class BaseNode(object):
 		self.affiliations = {'owner': [], 'publisher': [], 'member': [], 'outcast': [], 'pending': []}
 		self.subscriptions = []
 		if self.new_owner is not None:
-			self.affiliations['owner'].append((self.new_owner, None, None))
+			self.affiliations['owner'].append(self.new_owner)
 		self.dbLoad()
 	
 	def dbLoad(self):
 		if self.db.hasNode(self.name):
 			self.affiliations = self.db.getAffiliations(self.name)
 			self.items = self.db.getItems(self.name)
-			self.config = self.xmpp.plugin['xep_0004'].buildForm(self.db.getNodeConfig(self.name))
+			self.config = self.xmpp.plugin['xep_0004'].buildForm(ET.fromstring(self.db.getNodeConfig(self.name)))
+			self.subscriptions = self.db.getSubscriptions(self.name)
 		else:
 			self.db.createNode(self.name, self.config, self.affiliations, self.items)
+		logging.info("Loaded affilations for %s: %s" % (self.name, self.affiliations))
+		logging.info("Loaded subscriptions %s" % (self.subscriptions,))
 
 	def dbDump(self):
 		self.db.synch(self.name, self.config. self.affiliations, self.items)
@@ -106,16 +111,25 @@ class BaseNode(object):
 		pass
 	
 	def getSubscriptions(self):
-		pass
+		return self.subscriptions
 
 	def getAffiliations(self):
-		pass
+		return self.affiliations
 	
-	def subscribe(self, config=None):
-		pass
+	def subscribe(self, jid, who=None, config=None):
+		subid = uuid.uuid4().hex
+		if config is not None:
+			config = ET.tostring(config.getXML('submit'))
+		self.subscriptions.append((jid, subid, config))
+		self.db.addSubscription(self.name, jid, subid, config)
+		#TODO modify affiliation
 
-	def unsubscribe(self):
-		pass
+	def unsubscribe(self, jid, who=None, subid=None):
+		self.db.deleteSubscription(self.name, jid, subid)
+		self.subscriptions = self.db.getSubscriptions(self.name)
+		#TODO add error cases
+		#TODO add ACL
+		return True
 	
 	def getSubscriptionOptions(self):
 		pass
@@ -154,11 +168,11 @@ class BaseNode(object):
 		pass
 	
 	def getConfig(self, default=False):
-		pass
+		return self.config
 
 	def configure(self, config):
 		self.config = self.config.merge(config)
-		synch = False
+		self.db.synch(self.name, config=config)
 	
 	def delete(self):
 		pass
