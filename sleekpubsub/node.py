@@ -4,13 +4,14 @@ from sleekxmpp.xmlstream.handler.callback import Callback
 from xml.etree import cElementTree as ET
 import uuid
 import logging
+import pickle
 
 class Subscription(object):
-	def __init__(self, node):
-		self.jid = None
-		self.subid = None
-		self.config = None
+	def __init__(self, node, jid=None, subid=None, config=None):
 		self.node = node
+		self.jid = jid
+		self.subid = subid
+		self.config = config
 	
 	def set(self, jid, subid, config):
 		self.jid = jid
@@ -88,7 +89,8 @@ class BaseNode(object):
 		self.items = {}
 		self.synch = True
 		self.affiliations = {'owner': [], 'publisher': [], 'member': [], 'outcast': [], 'pending': []}
-		self.subscriptions = []
+		self.subscriptions = {}
+		self.subscriptionsbyjid = {}
 		if self.new_owner is not None:
 			self.affiliations['owner'].append(self.new_owner)
 		self.dbLoad()
@@ -98,11 +100,12 @@ class BaseNode(object):
 			self.affiliations = self.db.getAffiliations(self.name)
 			self.items = self.db.getItems(self.name)
 			self.config = self.xmpp.plugin['xep_0004'].buildForm(ET.fromstring(self.db.getNodeConfig(self.name)))
-			self.subscriptions = self.db.getSubscriptions(self.name)
+			subs = self.db.getSubscriptions(self.name)
+			for jid, subid, config in subs:
+				self.subscriptions[subid] = Subscription(self, jid, subid, config)
+				self.subscriptionsbyjid[jid] = self.subscriptions[subid]
 		else:
 			self.db.createNode(self.name, self.config, self.affiliations, self.items)
-		logging.info("Loaded affilations for %s: %s" % (self.name, self.affiliations))
-		logging.info("Loaded subscriptions %s" % (self.subscriptions,))
 
 	def dbDump(self):
 		self.db.synch(self.name, self.config. self.affiliations, self.items)
@@ -120,13 +123,19 @@ class BaseNode(object):
 		subid = uuid.uuid4().hex
 		if config is not None:
 			config = ET.tostring(config.getXML('submit'))
-		self.subscriptions.append((jid, subid, config))
+		self.subscriptions[subid] = Subscription(self, jid, subid, config)
+		self.subscriptionsbyjid[jid] = self.subscriptions[subid]
 		self.db.addSubscription(self.name, jid, subid, config)
 		#TODO modify affiliation
 
 	def unsubscribe(self, jid, who=None, subid=None):
 		self.db.deleteSubscription(self.name, jid, subid)
-		self.subscriptions = self.db.getSubscriptions(self.name)
+		try:
+			del self.subscriptions[subid]
+			if self.subscriptionsbyjid[jid].getsubid() == subid:
+				del self.subscriptionsbyjid[jid]
+		except IndexError():
+			return False
 		#TODO add error cases
 		#TODO add ACL
 		return True
@@ -145,12 +154,14 @@ class BaseNode(object):
 	
 	def eachSubscriber(self):
 		"Generator for subscribers."
-		for subscriber in self.subscriptions:
+		for subid in self.subscriptions:
+			subscriber = self.subscriptions[subid]
 			jid = subscriber.getjid()
-			if '/' in jid or not self.config.fields.get('pubsub#presence_based_delivery', False):
+			logging.debug("%s: %s %s" % (jid, '/' in jid, self.config.field.get('pubsub#presence_based_delivery', False).value))
+			if '/' in jid or not self.config.field.get('pubsub#presence_based_delivery', False).value:
 					yield jid
 			else:
-				for resource in self.roster.get(jid, {'presence': []})['presence']:
+				for resource in self.xmpp.roster.get(jid, {'presence': []})['presence']:
 					yield "%s/%s" % (jid, resource)
 	
 	def publish(self, item, item_id=None, options=None):
