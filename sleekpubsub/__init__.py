@@ -6,13 +6,16 @@ import uuid
 from . db import PubsubDB
 from . node import BaseNode
 import logging
+from . adhoc import PubsubAdhoc
 
 class PublishSubscribe(object):
 	
 	def __init__(self, xmpp):
 		self.xmpp = xmpp
+		self.adhoc = PubsubAdhoc(self)
 		
 		self.default_config = self.getDefaultConfig()
+		self.nodeset = set()
 		
 		self.admins = []
 		self.node_classes = {'leaf': BaseNode}
@@ -26,10 +29,40 @@ class PublishSubscribe(object):
 		self.xmpp.registerHandler(Callback('pubsub subscribe', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub'><subscribe xmlns='http://jabber.org/protocol/pubsub' /></pubsub></iq>" % self.xmpp.default_ns), self.handleSubscribe)) 
 		self.xmpp.registerHandler(Callback('pubsub unsubscribe', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub'><unsubscribe xmlns='http://jabber.org/protocol/pubsub' /></pubsub></iq>" % self.xmpp.default_ns), self.handleUnsubscribe)) 
 		self.xmpp.add_event_handler("session_start", self.start)
+		self.xmpp.add_event_handler("changed_subscription", self.handlePresenceSubscribe)
 	
 	def start(self, event):
 		self.db = PubsubDB('pubsub.db', self.xmpp)
 		self.loadNodes()
+		for jid in self.db.getRoster():
+			self.xmpp.sendPresence(pto=jid, ptype='probe')
+			self.xmpp.sendPresence(pto=jid)
+
+	def handlePresenceSubscribe(self, event):
+		ifrom = self.xmpp.getjidbare(event['from'])
+		ito = self.xmpp.getjidbare(event['to'])
+		print("Handling...")
+		subto, subfrom = self.db.getRosterJid(ifrom)
+		print((subto, subfrom))
+		if event['to'] == self.xmpp.jid:
+			if event['type'] == 'subscribe':
+				if not subto:
+					print("sending out subscribed")
+					self.xmpp.sendPresenceSubscription(pto=ifrom, pfrom=ito, ptype='subscribed')
+					self.db.setRosterTo(ifrom, True)
+				if not subfrom:
+					self.xmpp.sendPresenceSubscription(pto=ifrom, pfrom=ito, ptype='subscribe')
+				self.xmpp.sendPresence(pto=ifrom)
+			elif event['type'] == 'unsubscribe':
+				self.xmpp.sendPresenceSubscription(pto=ifrom,  pfrom=ito, ptype='unsubscribed')
+				self.xmpp.sendPresenceSubscription(pto=ifrom,  pfrom=ito, ptype='unsubscribe')
+				self.db.clearRoster(ifrom)
+			elif event['type'] == 'subscribed':
+				if not subfrom:
+					self.db.setRosterFrom(ifrom, True)
+				if not subto:
+					self.xmpp.sendPresenceSubscription(pto=ifrom, pfrom=ito, ptype='subscribed')
+					self.db.setRosterTo(ifrom, True)
 
 	def getDefaultConfig(self):
 		default_config = self.xmpp.plugin['xep_0004'].makeForm()
@@ -62,8 +95,9 @@ class PublishSubscribe(object):
 		return default_config
 	
 	def loadNodes(self):
-		for node, node_type in self.db.eachNode():
+		for node, node_type in self.db.getNodes():
 			self.nodes[node] = self.node_classes.get(node_type, BaseNode)(self, self.db, node)
+			self.nodeset.update((node,))
 	
 	def registerNodeClass(self, nodeclass):
 		self.node_classes[nodeclass.nodetype] = nodeclass
@@ -117,16 +151,17 @@ class PublishSubscribe(object):
 		node = create.get('node', uuid.uuid4().hex)
 		xform = xml.find('{http://jabber.org/protocol/pubsub}pubsub/{http://jabber.org/protocol/pubsub}configure/{jabber:x:data}x')
 		if xform is None:
-			logging.warning("No Config included")
+			#logging.warning("No Config included")
 			xform = self.default_config.getXML('submit')
 		config = self.xmpp.plugin['xep_0004'].buildForm(xform)
 		config = self.default_config.merge(config)
-		values = config.getValues()
-		nodeclass = self.node_classes.get(values['pubsub#node_type'])
-		if node in self.nodes or nodeclass is None:
+		config = config.getValues()
+		nodeclass = self.node_classes.get(config['pubsub#node_type'])
+		if node in self.nodeset or nodeclass is None:
 			self.xmpp.send(self.xmpp.makeIqError(xml.get('id')))
 			return
-		self.nodes[node] = nodeclass(self, self.db, node, config, owner=self.xmpp.getjidbare(xml.get('from')))
+		self.nodes[node] = nodeclass(self, self.db, node, config, owner=self.xmpp.getjidbare(xml.get('from')), fresh=True)
+		self.nodeset.update((node,))
 		iq = self.xmpp.makeIqResult(xml.get('id'))
 		iq.attrib['from'] = self.xmpp.jid
 		iq.attrib['to'] = xml.get('from')
@@ -141,16 +176,18 @@ class PublishSubscribe(object):
 		configure = xml.find('{http://jabber.org/protocol/pubsub#owner}pubsub/{http://jabber.org/protocol/pubsub#owner}configure')
 		node = configure.get('node')
 		xform = xml.find('{http://jabber.org/protocol/pubsub#owner}pubsub/{http://jabber.org/protocol/pubsub#owner}configure/{jabber:x:data}x')
-		if node not in self.nodes:
+		if node not in self.nodeset:
 			self.xmpp.send(self.xmpp.makeIqError(xml.get('id')))
 			return
+		inode = self.nodes[node]
 		if xform is None:
 			logging.warning("No Config included")
-			config = self.nodes[node].config
+			config = inode.getConfig()
 		else:
 			mergeconfig = self.xmpp.plugin['xep_0004'].buildForm(xform)
-			config = self.nodes[node].config.merge(mergeconfig)
-		self.nodes[node].configure(config)
+			config = self.default_config.merge(mergeconfig).getValues()
+		logging.info("Adding config... %s" % config)
+		inode.configure(config)
 		iq = self.xmpp.makeIqResult(xml.get('id'))
 		iq.attrib['from'] = self.xmpp.jid
 		iq.attrib['to'] = xml.get('from')
@@ -161,7 +198,7 @@ class PublishSubscribe(object):
 		subscribe = xml.find('{http://jabber.org/protocol/pubsub}pubsub/{http://jabber.org/protocol/pubsub}subscribe')
 		node = subscribe.get('node')
 		jid = subscribe.get('jid')
-		if node not in self.nodes:
+		if node not in self.nodeset:
 			self.xmpp.send(self.xmpp.makeIqError(xml.get('id')))
 			return
 		subid = self.nodes[node].subscribe(jid, xml.get('from'))
@@ -176,7 +213,7 @@ class PublishSubscribe(object):
 		node = subscribe.get('node')
 		jid = subscribe.get('jid')
 		subid = subscribe.get('subid')
-		if node not in self.nodes:
+		if node not in self.nodeset:
 			self.xmpp.send(self.xmpp.makeIqError(xml.get('id')))
 			return
 		self.nodes[node].unsubscribe(jid, xml.get('from'), subid)
@@ -189,10 +226,12 @@ class PublishSubscribe(object):
 		xml = stanza.xml
 		configure = xml.find('{http://jabber.org/protocol/pubsub#owner}pubsub/{http://jabber.org/protocol/pubsub#owner}configure')
 		node = configure.get('node')
-		if node not in self.nodes:
+		if node not in self.nodeset:
 			self.xmpp.send(self.xmpp.makeIqError(xml.get('id')))
 			return
-		config = self.nodes[node].getConfig().getXML('form')
+		config = self.default_config.copy()
+		config.setValues(self.nodes[node].getConfig())
+		config = config.getXML('form')
 		iq = self.xmpp.makeIqResult(xml.get('id'))
 		iq.attrib['from'] = self.xmpp.jid
 		iq.attrib['to'] = xml.get('from')

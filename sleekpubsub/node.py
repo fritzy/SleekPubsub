@@ -77,8 +77,9 @@ class Item(object):
 class BaseNode(object):
 	nodetype = 'leaf'
 
-	def __init__(self, pubsub, db, name, config=None, owner=None):
+	def __init__(self, pubsub, db, name, config=None, owner=None, fresh=False):
 		self.new_owner = owner
+		self.fresh = fresh
 		self.pubsub = pubsub
 		self.xmpp = self.pubsub.xmpp
 		self.db = db
@@ -96,10 +97,10 @@ class BaseNode(object):
 		self.dbLoad()
 	
 	def dbLoad(self):
-		if self.db.hasNode(self.name):
+		if not self.fresh:
 			self.affiliations = self.db.getAffiliations(self.name)
 			self.items = self.db.getItems(self.name)
-			self.config = self.xmpp.plugin['xep_0004'].buildForm(ET.fromstring(self.db.getNodeConfig(self.name)))
+			self.config = pickle.loads(self.db.getNodeConfig(self.name))
 			subs = self.db.getSubscriptions(self.name)
 			for jid, subid, config in subs:
 				self.subscriptions[subid] = Subscription(self, jid, subid, config)
@@ -108,7 +109,7 @@ class BaseNode(object):
 			self.db.createNode(self.name, self.config, self.affiliations, self.items)
 
 	def dbDump(self):
-		self.db.synch(self.name, self.config. self.affiliations, self.items)
+		self.db.synch(self.name, pickle.dumps(self.config), self.affiliations, self.items)
 	
 	def discoverItems(self):
 		pass
@@ -157,8 +158,8 @@ class BaseNode(object):
 		for subid in self.subscriptions:
 			subscriber = self.subscriptions[subid]
 			jid = subscriber.getjid()
-			logging.debug("%s: %s %s" % (jid, '/' in jid, self.config.field.get('pubsub#presence_based_delivery', False).value))
-			if '/' in jid or not self.config.field.get('pubsub#presence_based_delivery', False).value:
+			logging.debug("%s: %s %s" % (jid, '/' in jid, self.config.get('pubsub#presence_based_delivery', False)))
+			if '/' in jid or not self.config.get('pubsub#presence_based_delivery', False):
 					yield jid
 			else:
 				for resource in self.xmpp.roster.get(jid, {'presence': []})['presence']:
@@ -168,6 +169,7 @@ class BaseNode(object):
 		if item_id is None:
 			item_id = uuid.uuid4().hex
 		payload = item.getchildren()[0]
+		self.db.setItem(self.name, item_id, payload)
 		for jid in self.eachSubscriber(): 
 			self.notifyItem(payload, jid, item_id)
 		return item_id # item id
@@ -182,8 +184,8 @@ class BaseNode(object):
 		return self.config
 
 	def configure(self, config):
-		self.config = self.config.merge(config)
-		self.db.synch(self.name, config=config)
+		self.config.update(config)
+		self.db.synch(self.name, config=pickle.dumps(self.config))
 	
 	def delete(self):
 		pass

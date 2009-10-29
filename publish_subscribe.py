@@ -3,6 +3,9 @@ import sleekxmpp.componentxmpp
 from optparse import OptionParser
 import logging
 import sleekpubsub
+#import sleekxmpp.xmlstream.xmlstream
+
+#sleekxmpp.xmlstream.xmlstream.HANDLER_THREADS = 5
 
 if __name__ == '__main__':
 	#parse command line arguements
@@ -23,6 +26,7 @@ if __name__ == '__main__':
 	xmpp.registerPlugin('xep_0004')
 	xmpp.registerPlugin('xep_0030')
 	xmpp.registerPlugin('xep_0045')
+	xmpp.registerPlugin('xep_0050')
 	xmpp.registerPlugin('xep_0060')
 	xmpp.registerPlugin('xep_0199')
 	pubsub = sleekpubsub.PublishSubscribe(xmpp)
