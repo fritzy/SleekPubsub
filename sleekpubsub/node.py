@@ -5,6 +5,7 @@ from xml.etree import cElementTree as ET
 import uuid
 import logging
 import pickle
+import time
 
 class Subscription(object):
 	def __init__(self, node, jid=None, subid=None, config=None):
@@ -29,7 +30,7 @@ class Subscription(object):
 
 class Event(object):
 	def __init__(self, node):
-		self.node = node
+		self.nodes = [node]
 		self.jids = []
 	
 	def addJid(self, jid):
@@ -38,12 +39,18 @@ class Event(object):
 	def hasJid(self, jid):
 		return jid in self.jids
 	
+	def addNode(self, node):
+		self.nodes.append(node)
+	
+	def hasNode(self, node):
+		return node in self.nodes
+	
 	def cleanup(self):
 		self.jids = []
 
 class ItemEvent(Event):
 	def __init__(self, node, item):
-		event.__init__(self, node)
+		Event.__init__(self, node)
 		self.item = item
 	
 	def getItem(self):
@@ -88,7 +95,9 @@ class BaseNode(object):
 		self.subscription_form = {}
 		self.publish_form = {}
 		self.items = {}
+		self.itemorder = []
 		self.synch = True
+		self.item_class = Item
 		self.affiliations = {'owner': [], 'publisher': [], 'member': [], 'outcast': [], 'pending': []}
 		self.subscriptions = {}
 		self.subscriptionsbyjid = {}
@@ -165,17 +174,29 @@ class BaseNode(object):
 				for resource in self.xmpp.roster.get(jid, {'presence': []})['presence']:
 					yield "%s/%s" % (jid, resource)
 	
-	def publish(self, item, item_id=None, options=None):
+	def publish(self, item, item_id=None, options=None, who=None):
 		if item_id is None:
 			item_id = uuid.uuid4().hex
 		payload = item.getchildren()[0]
-		self.db.setItem(self.name, item_id, payload)
-		for jid in self.eachSubscriber(): 
-			self.notifyItem(payload, jid, item_id)
+		item_inst = self.item_class(self, item_id, who, payload, options)
+		if self.config.get('pubsub#persist_items', False):
+			self.db.setItem(self.name, item_id, payload)
+			self.items[item_id] = item_inst
+			if item_id not in self.itemorder:
+				self.itemorder.append(item_id)
+		event = ItemEvent(self, item_inst)
+		self.notifyItem(event)
+		max_items = int(self.config.get('pubsub#max_items', 0))
+		if max_items != 0 and len(self.itemorder) > max_items:
+			self.deleteItem(self.itemorder[0])
 		return item_id # item id
 
 	def deleteItem(self, id):
-		pass
+		if id in self.items:
+			item = self.items[id]
+			del self.items[id]
+			self.itemorder.pop(self.itemorder.index(id))
+			self.notifyDelete(ItemEvent(self, item))
 	
 	def create(self, config=None):
 		pass
@@ -202,19 +223,26 @@ class BaseNode(object):
 	def modifyAffiliations(self, jids={}):
 		pass
 	
-	def notifyItem(self, payload, jid, item_id):
+	def notifyItem(self, event):
+		item_id = event.item.name
+		payload = event.item.payload
+		jid=''
 		msg = self.xmpp.makeMessage(mto=jid, mfrom=self.xmpp.jid)
-		event = ET.Element('{http://jabber.org/protocol/pubsub#event}event')
+		xevent = ET.Element('{http://jabber.org/protocol/pubsub#event}event')
 		items = ET.Element('items', {'node': self.name})
 		item = ET.Element('item', {'id': item_id})
 		item.append(payload)
 		items.append(item)
-		event.append(items)
-		msg.append(event)
-		self.xmpp.send(msg)
+		xevent.append(items)
+		msg.append(xevent)
+		for jid in self.eachSubscriber(): 
+			if not event.hasJid(jid):
+				event.addJid(jid)
+				msg.attrib['to'] = jid
+				self.xmpp.send(msg)
 	
 	def notifyConfig(self):
 		pass
 	
-	def notifyDeleteItem(self):
+	def notifyDelete(self, event):
 		pass

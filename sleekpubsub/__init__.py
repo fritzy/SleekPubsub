@@ -13,6 +13,7 @@ class PublishSubscribe(object):
 	def __init__(self, xmpp):
 		self.xmpp = xmpp
 		self.adhoc = PubsubAdhoc(self)
+		self.nodeplugins = []
 		
 		self.default_config = self.getDefaultConfig()
 		self.nodeset = set()
@@ -98,10 +99,13 @@ class PublishSubscribe(object):
 		for node, node_type in self.db.getNodes():
 			self.nodes[node] = self.node_classes.get(node_type, BaseNode)(self, self.db, node)
 			self.nodeset.update((node,))
+
+	def registerNodeType(self, nodemodule):
+		self.nodeplugins.append(nodemodule.extension_class(self))
 	
 	def registerNodeClass(self, nodeclass):
 		self.node_classes[nodeclass.nodetype] = nodeclass
-		self.default_config.fields['pubsub#node_type'].addOption(nodeclass.nodetype, nodeclass.nodetype.title())
+		self.default_config.field['pubsub#node_type'].addOption(nodeclass.nodetype, nodeclass.nodetype.title())
 	
 	def handlePublish(self, stanza):
 		"""iq/{http://jabber.org/protocol/pubsub}pubsub/{http://jabber.org/protocol/pubsub}publish"""
@@ -122,7 +126,7 @@ class PublishSubscribe(object):
 			for item in items:
 				logging.debug(item)
 				item_id = item.get('id')
-				item_id = nodei.publish(item, item_id)
+				item_id = nodei.publish(item, item_id, who=xml.get('from'))
 				ids.append(item_id)
 			iq = self.xmpp.makeIqResult(id)
 		iq.attrib['to'] = xml.get('from')

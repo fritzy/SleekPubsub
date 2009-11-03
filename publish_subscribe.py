@@ -3,6 +3,7 @@ import sleekxmpp.componentxmpp
 from optparse import OptionParser
 import logging
 import sleekpubsub
+import sleekpubsub.jobnode
 #import sleekxmpp.xmlstream.xmlstream
 
 #sleekxmpp.xmlstream.xmlstream.HANDLER_THREADS = 5
@@ -30,6 +31,7 @@ if __name__ == '__main__':
 	xmpp.registerPlugin('xep_0060')
 	xmpp.registerPlugin('xep_0199')
 	pubsub = sleekpubsub.PublishSubscribe(xmpp)
+	pubsub.registerNodeType(sleekpubsub.jobnode)
 	if xmpp.connect():
 		xmpp.process(threaded=False)
 	else:
