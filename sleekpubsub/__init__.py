@@ -149,6 +149,21 @@ class PublishSubscribe(object):
 		default.append(self.default_config.getXML('form'))
 		self.xmpp.send(xml)
 	
+	def createNode(self, node, config=None, who=None):
+		if config is None:
+			config = self.default_config.copy()
+		else:
+			config = self.default_config.merge(config)
+		config = config.getValues()
+		nodeclass = self.node_classes.get(config['pubsub#node_type'])
+		if node in self.nodeset or nodeclass is None:
+			return False
+		if who:
+			who = self.xmpp.getjidbare(who)
+		self.nodes[node] = nodeclass(self, self.db, node, config, owner=who, fresh=True)
+		self.nodeset.update((node,))
+		return True
+	
 	def handleCreateNode(self, stanza):
 		xml = stanza.xml
 		create = xml.find('{http://jabber.org/protocol/pubsub}pubsub/{http://jabber.org/protocol/pubsub}create')
@@ -158,14 +173,9 @@ class PublishSubscribe(object):
 			#logging.warning("No Config included")
 			xform = self.default_config.getXML('submit')
 		config = self.xmpp.plugin['xep_0004'].buildForm(xform)
-		config = self.default_config.merge(config)
-		config = config.getValues()
-		nodeclass = self.node_classes.get(config['pubsub#node_type'])
-		if node in self.nodeset or nodeclass is None:
+		if not self.createNode(node, config. xml.get('from')):
 			self.xmpp.send(self.xmpp.makeIqError(xml.get('id')))
 			return
-		self.nodes[node] = nodeclass(self, self.db, node, config, owner=self.xmpp.getjidbare(xml.get('from')), fresh=True)
-		self.nodeset.update((node,))
 		iq = self.xmpp.makeIqResult(xml.get('id'))
 		iq.attrib['from'] = self.xmpp.jid
 		iq.attrib['to'] = xml.get('from')
@@ -175,40 +185,44 @@ class PublishSubscribe(object):
 		iq.append(pubsub)
 		self.xmpp.send(iq)
 	
+	def configureNode(self, node, config):
+		if node not in self.nodeset:
+			return False
+		config = self.default_config.merge(config).getValues()
+		self.nodes[node].configure(config)
+		return True
+	
 	def handleConfigureNode(self, stanza):
 		xml = stanza.xml
 		configure = xml.find('{http://jabber.org/protocol/pubsub#owner}pubsub/{http://jabber.org/protocol/pubsub#owner}configure')
 		node = configure.get('node')
 		xform = xml.find('{http://jabber.org/protocol/pubsub#owner}pubsub/{http://jabber.org/protocol/pubsub#owner}configure/{jabber:x:data}x')
-		if node not in self.nodeset:
+		if xform is None or not self.configureNode(node, self.xmpp.plugin['xep_0004'].buildForm(xform)):
 			self.xmpp.send(self.xmpp.makeIqError(xml.get('id')))
 			return
-		inode = self.nodes[node]
-		if xform is None:
-			logging.warning("No Config included")
-			config = inode.getConfig()
-		else:
-			mergeconfig = self.xmpp.plugin['xep_0004'].buildForm(xform)
-			config = self.default_config.merge(mergeconfig).getValues()
-		logging.info("Adding config... %s" % config)
-		inode.configure(config)
 		iq = self.xmpp.makeIqResult(xml.get('id'))
 		iq.attrib['from'] = self.xmpp.jid
 		iq.attrib['to'] = xml.get('from')
 		self.xmpp.send(iq)
+	
+	def subscribeNode(self, node, jid, who=None):
+		if node not in self.nodeset:
+			return False
+		return self.nodes[node].subscribe(jid, who)
 	
 	def handleSubscribe(self, stanza):
 		xml = stanza.xml
 		subscribe = xml.find('{http://jabber.org/protocol/pubsub}pubsub/{http://jabber.org/protocol/pubsub}subscribe')
 		node = subscribe.get('node')
 		jid = subscribe.get('jid')
-		if node not in self.nodeset:
+		subid = self.subscribeNode(self, node, jid, xml.get('from'))
+		if not subid:
 			self.xmpp.send(self.xmpp.makeIqError(xml.get('id')))
 			return
-		subid = self.nodes[node].subscribe(jid, xml.get('from'))
 		iq = self.xmpp.makeIqResult(xml.get('id'))
 		iq.attrib['from'] = self.xmpp.jid
 		iq.attrib['to'] = xml.get('from')
+		#TODO pass back subscription id
 		self.xmpp.send(iq)
 	
 	def handleUnsubscribe(self, stanza):
@@ -226,15 +240,21 @@ class PublishSubscribe(object):
 		iq.attrib['to'] = xml.get('from')
 		self.xmpp.send(iq)
 	
+	def getNodeConfig(self, node):
+		if node not in self.nodeset:
+			return False
+		config = self.default_config.copy()
+		config.setValues(self.nodes[node].getConfig())
+		return config
+	
 	def handleGetNodeConfig(self, stanza):
 		xml = stanza.xml
 		configure = xml.find('{http://jabber.org/protocol/pubsub#owner}pubsub/{http://jabber.org/protocol/pubsub#owner}configure')
 		node = configure.get('node')
-		if node not in self.nodeset:
+		config = self.getNodeConfig(node)
+		if config == False:
 			self.xmpp.send(self.xmpp.makeIqError(xml.get('id')))
 			return
-		config = self.default_config.copy()
-		config.setValues(self.nodes[node].getConfig())
 		config = config.getXML('form')
 		iq = self.xmpp.makeIqResult(xml.get('id'))
 		iq.attrib['from'] = self.xmpp.jid

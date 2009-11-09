@@ -136,6 +136,7 @@ class BaseNode(object):
 		self.subscriptions[subid] = Subscription(self, jid, subid, config)
 		self.subscriptionsbyjid[jid] = self.subscriptions[subid]
 		self.db.addSubscription(self.name, jid, subid, config)
+		return subid
 		#TODO modify affiliation
 
 	def unsubscribe(self, jid, who=None, subid=None):

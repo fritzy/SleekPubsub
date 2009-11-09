@@ -14,9 +14,9 @@ class PubsubAdhoc(object):
 		createleaf.addField('node', 'text-single')
 		self.xmpp.plugin['xep_0050'].addCommand('newleaf', 'Create Leaf', createleaf, self.createLeafHandler, True)
 
-		createcollect = self.xmpp.plugin['xep_0004'].makeForm('form', "Create Collection")
-		createcollect.addField('node', 'text-single', 'Node name')
-		self.xmpp.plugin['xep_0050'].addCommand('newcollection', 'Create Collection', createcollect, self.createCollectionHandler, True)
+		#createcollect = self.xmpp.plugin['xep_0004'].makeForm('form', "Create Collection")
+		#createcollect.addField('node', 'text-single', 'Node name')
+		#self.xmpp.plugin['xep_0050'].addCommand('newcollection', 'Create Collection', createcollect, self.createCollectionHandler, True)
 
 		setitem = self.xmpp.plugin['xep_0004'].makeForm('form', "Set Item")
 		setitem.addField('node', 'text-single')
@@ -66,7 +66,7 @@ class PubsubAdhoc(object):
 			return nodeform, self.createLeafHandlerSubmit, True
 	
 	def createLeafHandlerSubmit(self, form, sessid):
-		if not self.xmpp.plugin['xep_0060'].create_node(self.psserver, self.adhoc.sessions[sessid]['pubsubnode'], form):
+		if not self.ps.createNode(self.adhoc.sessions[sessid]['pubsubnode'], form, who=self.adhoc.sessions[sessid]['jid']):
 			return self.getStatusForm('Error', "Could not create node."), None, False
 		else:
 			return self.getStatusForm('Done', "Node %s created." % self.adhoc.sessions[sessid]['pubsubnode']), None, False
@@ -84,7 +84,7 @@ class PubsubAdhoc(object):
 		value = form.getValues()
 		node = value.get('node')
 		jid = value.get('jid')
-		if self.pubsub.subscribe(self.psserver, node, subscribee=jid):
+		if self.ps.subscribeNode(node, jid, who=self.adhoc.sessions[sessid]['jid']):
 			return self.getStatusForm('Done', "Subscribed to node %s." % node), None, False
 		return self.getStatusForm('Error', "Could not subscribe to %s." % node), None, False
 	
@@ -99,7 +99,7 @@ class PubsubAdhoc(object):
 		value = form.getValues()
 		node = value.get('node')
 		self.adhoc.sessions[sessid]['pubsubnode'] = node
-		nodeform = self.pubsub.getNodeConfig(self.psserver, node)
+		nodeform = self.ps.getNodeConfig(node)
 		if nodeform:
 			return nodeform, self.updateConfigHandlerSubmit, True
 		else:
@@ -107,7 +107,7 @@ class PubsubAdhoc(object):
 	
 	def updateConfigHandlerSubmit(self, form, sessid):
 		node = self.adhoc.sessions[sessid]['pubsubnode']
-		self.pubsub.setNodeConfig(self.psserver, node, form)
+		self.ps.configureNode(node, form)
 		return self.getStatusForm('Done', "Updated node %s." % node), None, False
 	
 	
