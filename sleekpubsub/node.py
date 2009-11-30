@@ -83,6 +83,7 @@ class Item(object):
 
 class BaseNode(object):
 	nodetype = 'leaf'
+	affiliationtypes = ('owner', 'publisher', 'member', 'outcast', 'pending')
 
 	def __init__(self, pubsub, db, name, config=None, owner=None, fresh=False):
 		self.new_owner = owner
@@ -221,8 +222,13 @@ class BaseNode(object):
 	def modifySubscriptions(self, jids={}):
 		pass
 	
-	def modifyAffiliations(self, jids={}):
-		pass
+	def modifyAffiliations(self, affiliations={}):
+		for key in affiliations:
+			if key not in self.affiliationtypes:
+				return False
+		self.affilaitions.update(affiliations)
+		self.db.synch(self.name, affiliations=self.affiliations)
+
 	
 	def notifyItem(self, event):
 		item_id = event.item.name
