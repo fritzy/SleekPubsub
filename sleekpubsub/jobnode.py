@@ -13,7 +13,7 @@ class JobItem(Item):
 		self.state = 'new'
 		self.level = 0
 		self.worker = ''
-		result = ''
+		self.result = ''
 	
 	def setState(self, state):
 		if state in self.states:
@@ -32,6 +32,7 @@ class JobItem(Item):
 		return worker
 	
 	def setResult(self, result):
+		print("Setting up result!")
 		self.result = result
 	
 	def getResult(self):
@@ -49,10 +50,12 @@ class JobNode(BaseNode):
 	
 	def notifyState(self, event, state):
 		item_id = event.item.name
-		payload = event.item.payload
+		payload = event.item.result
 		jid=''
 		msg = self.xmpp.makeMessage(mto=jid, mfrom=self.xmpp.jid)
 		xevent = ET.Element('{http://andyet.net/protocol/pubsubjob#event}pubsubjob', {'node': self.name, 'item': item_id, 'worker': event.item.worker, 'state': state})
+		if payload != '':
+			xevent.append(payload)
 		msg.append(xevent)
 		for jid in self.eachJobListener(event.item): 
 			if not event.hasJid(jid):
@@ -145,16 +148,17 @@ class JobNodeExtension(BaseNode):
 				iq = self.xmpp.makeIqResult(xml.get('id'))
 			elif newstate == 'processing' and item.isState('claimed') and ifrom == item.worker:
 				item.setState('processing')
-				node.notifyProcessing(ItemEvent(node, item))
+				node.notifyState(ItemEvent(node, item), 'processing')
 				iq = self.xmpp.makeIqResult(xml.get('id'))
 			elif newstate == 'finished' and item.isState('processing'):
 				#make sure they're the ones that claimed the job
 				#publish result notice
 				#accept finished
 				item.setState('finished')
-				result = pubsubjob.find('{http://andyet.net/protocol/pubsubjob}result')
-				item.setResult(result)
-				node.notifyResult(ItemEvent(node, item))
+				if pubsubjob.getchildren():
+					result = pubsubjob.getchildren()[0]
+					item.setResult(result)
+				node.notifyState(ItemEvent(node, item), 'finished')
 				node.deleteItem(item.name)
 				iq = self.xmpp.makeIqResult(xml.get('id'))
 			elif newstate == 'cancelled':
