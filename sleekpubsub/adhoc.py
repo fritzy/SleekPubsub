@@ -113,7 +113,7 @@ class PubsubAdhoc(object):
 	
 	def setItemHandler(self, form, sessid):
 		value = form.getValues()
-		self.pubsub.setItem(self.psserver, value['node'], [(value['id'], ET.fromstring(value['xml']))])
+		self.ps.publish(value['node'], ET.fromstring(value['xml']), value['id'], self.adhoc.sessions[sessid]['jid'])
 		done = self.xform.makeForm('form', "Finished")
 		done.addField('done', 'fixed', value="Published Item.")
 		return done, None, False

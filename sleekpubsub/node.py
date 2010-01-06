@@ -179,7 +179,10 @@ class BaseNode(object):
 	def publish(self, item, item_id=None, options=None, who=None):
 		if item_id is None:
 			item_id = uuid.uuid4().hex
-		payload = item.getchildren()[0]
+		if item.tag == '{http://jabber.org/protocol/pubsub}item':
+			payload = item.getchildren()[0]
+		else:
+			payload = item
 		item_inst = self.item_class(self, item_id, who, payload, options)
 		if self.config.get('pubsub#persist_items', False):
 			self.db.setItem(self.name, item_id, payload)

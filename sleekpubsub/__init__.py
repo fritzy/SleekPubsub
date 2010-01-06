@@ -10,8 +10,9 @@ from . adhoc import PubsubAdhoc
 
 class PublishSubscribe(object):
 	
-	def __init__(self, xmpp):
+	def __init__(self, xmpp, dbfile):
 		self.xmpp = xmpp
+		self.dbfile = dbfile
 		self.adhoc = PubsubAdhoc(self)
 		self.nodeplugins = []
 		
@@ -33,7 +34,7 @@ class PublishSubscribe(object):
 		self.xmpp.add_event_handler("changed_subscription", self.handlePresenceSubscribe)
 	
 	def start(self, event):
-		self.db = PubsubDB('pubsub.db', self.xmpp)
+		self.db = PubsubDB(self.dbfile, self.xmpp)
 		self.loadNodes()
 		for jid in self.db.getRoster():
 			self.xmpp.sendPresence(pto=jid, ptype='probe')
@@ -139,6 +140,11 @@ class PublishSubscribe(object):
 		pubsub.append(publish)
 		iq.append(pubsub)
 		self.xmpp.send(iq)
+	
+	def publish(self, node, item, id, who=None):
+		if isinstance(node, str):
+			node = self.nodes.get(node)
+		return node.publish(item, id, who=who)
 	
 	def handleGetDefaultConfig(self, stanza):
 		xml = stanza.xml
