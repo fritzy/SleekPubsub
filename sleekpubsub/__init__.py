@@ -1,6 +1,8 @@
 import sleekxmpp.componentxmpp
 from sleekxmpp.xmlstream.matcher.xmlmask import MatchXMLMask
 from sleekxmpp.xmlstream.handler.callback import Callback
+from sleekxmpp.plugins import stanza_pubsub as Pubsub
+from sleekxmpp.exceptions import XMPPError
 from xml.etree import cElementTree as ET
 import uuid
 from . db import PubsubDB
@@ -32,26 +34,32 @@ class PublishSubscribe(object):
 		self.xmpp.registerHandler(Callback('pubsub unsubscribe', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub'><unsubscribe xmlns='http://jabber.org/protocol/pubsub' /></pubsub></iq>" % self.xmpp.default_ns), self.handleUnsubscribe)) 
 		self.xmpp.add_event_handler("session_start", self.start)
 		self.xmpp.add_event_handler("changed_subscription", self.handlePresenceSubscribe)
+		self.xmpp.add_event_handler("got_online", self.handleGotOnline)
 	
 	def start(self, event):
 		self.db = PubsubDB(self.dbfile, self.xmpp)
 		self.loadNodes()
-		for jid in self.db.getRoster():
-			self.xmpp.sendPresence(pto=jid, ptype='probe')
-			self.xmpp.sendPresence(pto=jid)
+		for jid, pfrom in self.db.getRoster():
+			if not pfrom: pfrom = self.xmpp.jid
+			self.xmpp.sendPresence(pto=jid, ptype='probe', pfrom=pfrom)
+			self.xmpp.sendPresence(pto=jid, pfrom=pfrom)
 
-	def handlePresenceSubscribe(self, event):
-		ifrom = self.xmpp.getjidbare(event['from'])
-		ito = self.xmpp.getjidbare(event['to'])
-		print("Handling...")
+	def handleGotOnline(self, pres)
+		pfrom = pres['to'].user
+		if pfrom: pfrom += "@"
+		pfrom += self.xmpp.jid
+		self.xmpp.sendPresence(pto=pres['from'].bare, pfrom=pfrom)
+
+	def handlePresenceSubscribe(self, pres):
+		ifrom = pres['from'].bare
+		ito = pres['to'].bare
 		subto, subfrom = self.db.getRosterJid(ifrom)
-		print((subto, subfrom))
-		if event['to'] == self.xmpp.jid:
+		if pres['to'] == self.xmpp.jid:
 			if event['type'] == 'subscribe':
 				if not subto:
 					print("sending out subscribed")
 					self.xmpp.sendPresenceSubscription(pto=ifrom, pfrom=ito, ptype='subscribed')
-					self.db.setRosterTo(ifrom, True)
+					self.db.setRosterTo(ifrom, True, ito)
 				if not subfrom:
 					self.xmpp.sendPresenceSubscription(pto=ifrom, pfrom=ito, ptype='subscribe')
 				self.xmpp.sendPresence(pto=ifrom)
@@ -64,7 +72,7 @@ class PublishSubscribe(object):
 					self.db.setRosterFrom(ifrom, True)
 				if not subto:
 					self.xmpp.sendPresenceSubscription(pto=ifrom, pfrom=ito, ptype='subscribed')
-					self.db.setRosterTo(ifrom, True)
+					self.db.setRosterTo(ifrom, True, ito)
 
 	def getDefaultConfig(self):
 		default_config = self.xmpp.plugin['xep_0004'].makeForm()
@@ -110,36 +118,18 @@ class PublishSubscribe(object):
 	
 	def handlePublish(self, stanza):
 		"""iq/{http://jabber.org/protocol/pubsub}pubsub/{http://jabber.org/protocol/pubsub}publish"""
-		xml = stanza.xml
-		id = xml.get('id')
-		publish = xml.find('{http://jabber.org/protocol/pubsub}pubsub/{http://jabber.org/protocol/pubsub}publish')
-		logging.debug("Publish xml %s" % publish)
-		node = publish.get('node')
-		nodei = self.nodes.get(node)
-		items = publish.findall('{http://jabber.org/protocol/pubsub}item')
-		logging.debug("Items: %s" % items)
+		node = self.nodes.get(stanza['pubsub']['publish']['node'])
 		ids = []
-		if nodei is None:
-			"TODO: Error here."
-			logging.error("Node not found.")
-			iq = self.xmpp.makeIqError(id)
-		else:
-			for item in items:
-				logging.debug(item)
-				item_id = item.get('id')
-				item_id = nodei.publish(item, item_id, who=xml.get('from'))
-				ids.append(item_id)
-			iq = self.xmpp.makeIqResult(id)
-		iq.attrib['to'] = xml.get('from')
-		iq.attrib['from'] = self.xmpp.jid
-		pubsub = ET.Element('{http://jabber.org/protocol/pubsub}pubsub')
-		publish = ET.Element('publish', {'node': node})
-		for item_id in ids:
-			nitem = ET.Element('item', {'id': item_id})
-			publish.append(nitem)
-		pubsub.append(publish)
-		iq.append(pubsub)
-		self.xmpp.send(iq)
+		if node is None:
+			raise XMPPError('item-not-found')
+		for item in stanza['pubsub']['publish']:
+			item_id = self.publish(stanza['pubsub']['publish']['node'], item['payload'], item['id'], stanza['from'].bare)
+			ids.append(item_id)
+		stanza.reply()
+		stanza['pubsub'].clear()
+		for id in ids:
+			stanza.append(Pubsub.Item({'id': id})
+		stanza.send()
 	
 	def publish(self, node, item, id, who=None):
 		if isinstance(node, str):
@@ -147,13 +137,9 @@ class PublishSubscribe(object):
 		return node.publish(item, id, who=who)
 	
 	def handleGetDefaultConfig(self, stanza):
-		xml = stanza.xml
-		xml.attrib['to'] = xml.attrib['from']
-		xml.attrib['from'] = self.xmpp.jid
-		xml.attrib['type'] = 'result'
-		default = xml.find('{http://jabber.org/protocol/pubsub#owner}pubsub/{http://jabber.org/protocol/pubsub#owner}default')
-		default.append(self.default_config.getXML('form'))
-		self.xmpp.send(xml)
+		stanza.reply()
+		stanza['pubsub']['default']['config'] = self.default_config
+		stanza.send()
 	
 	def createNode(self, node, config=None, who=None):
 		if config is None:
@@ -170,26 +156,17 @@ class PublishSubscribe(object):
 		self.nodeset.update((node,))
 		return True
 	
-	def handleCreateNode(self, stanza):
-		xml = stanza.xml
-		create = xml.find('{http://jabber.org/protocol/pubsub}pubsub/{http://jabber.org/protocol/pubsub}create')
-		node = create.get('node', uuid.uuid4().hex)
-		xform = xml.find('{http://jabber.org/protocol/pubsub}pubsub/{http://jabber.org/protocol/pubsub}configure/{jabber:x:data}x')
-		if xform is None:
-			#logging.warning("No Config included")
-			xform = self.default_config.getXML('submit')
-		config = self.xmpp.plugin['xep_0004'].buildForm(xform)
-		if not self.createNode(node, config. xml.get('from')):
-			self.xmpp.send(self.xmpp.makeIqError(xml.get('id')))
-			return
-		iq = self.xmpp.makeIqResult(xml.get('id'))
-		iq.attrib['from'] = self.xmpp.jid
-		iq.attrib['to'] = xml.get('from')
-		pubsub = ET.Element('{http://jabber.org/protocol/pubsub}pubsub')
-		create = ET.Element('{http://jabber.org/protocol/pubsub}create', {'node': node})
-		pubsub.append(create)
-		iq.append(pubsub)
-		self.xmpp.send(iq)
+	def handleCreateNode(self, iq):
+		node = iq['pubsub']['create']['node'] or uuid.uuid4().hex
+		config = iq['pubsub']['create']['configure']['config'] or self.default_config
+		if node in self.nodes:
+			raise XMPPError('conflict', etype='cancel')
+		if not self.createNode(node, config. iq['from']):
+			raise XMPPError()
+		iq.reply()
+		iq['pubsub'].clear()
+		iq['pubsub']['create']['node'] = node
+		iq.send()
 	
 	def configureNode(self, node, config):
 		if node not in self.nodeset:
@@ -211,7 +188,7 @@ class PublishSubscribe(object):
 		iq.attrib['to'] = xml.get('from')
 		self.xmpp.send(iq)
 	
-	def subscribeNode(self, node, jid, who=None):
+	def subscribeNode(self, node, jid, who=None, to=None):
 		if node not in self.nodeset:
 			return False
 		return self.nodes[node].subscribe(jid, who)

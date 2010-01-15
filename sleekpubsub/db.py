@@ -38,8 +38,8 @@ class PubsubDB(object):
 
 	def _getRoster(self):
 		c = self.rconn.cursor()
-		c.execute('select jid from roster where subto=1')
-		result = [x[0] for x in c.fetchall()]
+		c.execute('select jid,jidto from roster where subto=1')
+		result = [(x[0],x[1]) for x in c.fetchall()]
 		c.close()
 		return result
 	
@@ -61,12 +61,12 @@ class PubsubDB(object):
 			c.close()
 			return result[0]
 
-	def setRosterTo(self, ifrom, value):
-		self.win.put((None, self._setRosterTo, (ifrom, value)))
+	def setRosterTo(self, ifrom, value, ito):
+		self.win.put((None, self._setRosterTo, (ifrom, value, ito)))
 
-	def _setRosterTo(self, ifrom, value):
+	def _setRosterTo(self, ifrom, value, ito):
 		c = self.conn.cursor()
-		c.execute('update roster set subto=?', (int(value),))
+		c.execute('update roster set subto=?, jidto=? where jid=?', (int(value),ito,ifrom))
 		self.conn.commit()
 		c.close()
 	
@@ -75,7 +75,7 @@ class PubsubDB(object):
 
 	def _setRosterFrom(self, ifrom, value):
 		c = self.conn.cursor()
-		c.execute('update roster set subfrom=?', (int(value),))
+		c.execute('update roster set subfrom=? where jid=?', (int(value),ifrom))
 		self.conn.commit()
 		c.close()
 	
