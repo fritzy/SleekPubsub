@@ -1,5 +1,6 @@
 import sleekxmpp.componentxmpp
 from sleekxmpp.xmlstream.matcher.xmlmask import MatchXMLMask
+from sleekxmpp.xmlstream.matcher.stanzapath import StanzaPath
 from sleekxmpp.xmlstream.handler.callback import Callback
 from sleekxmpp.plugins import stanza_pubsub as Pubsub
 from sleekxmpp.exceptions import XMPPError
@@ -9,24 +10,28 @@ from . db import PubsubDB
 from . node import BaseNode
 import logging
 from . adhoc import PubsubAdhoc
+from . httpd import HTTPD
 
 class PublishSubscribe(object):
 	
-	def __init__(self, xmpp, dbfile):
+	def __init__(self, xmpp, dbfile, config):
 		self.xmpp = xmpp
 		self.dbfile = dbfile
-		self.adhoc = PubsubAdhoc(self)
 		self.nodeplugins = []
 		
+		self.config = config
 		self.default_config = self.getDefaultConfig()
 		self.nodeset = set()
 		
 		self.admins = []
 		self.node_classes = {'leaf': BaseNode}
 		self.nodes = {}
+		self.adhoc = PubsubAdhoc(self)
+		self.http = HTTPD(self)
 
 		self.xmpp.registerHandler(Callback('pubsub publish', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub'><publish xmlns='http://jabber.org/protocol/pubsub' /></pubsub></iq>" % self.xmpp.default_ns), self.handlePublish)) 
-		self.xmpp.registerHandler(Callback('pubsub create', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub'><create xmlns='http://jabber.org/protocol/pubsub' /></pubsub></iq>" % self.xmpp.default_ns), self.handleCreateNode)) 
+		#self.xmpp.registerHandler(Callback('pubsub create', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub'><create xmlns='http://jabber.org/protocol/pubsub' /></pubsub></iq>" % self.xmpp.default_ns), self.handleCreateNode)) 
+		self.xmpp.registerHandler(Callback('pubsub create', StanzaPath("iq@type=set/pubsub/publish"), self.handleCreateNode)) 
 		self.xmpp.registerHandler(Callback('pubsub configure', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub#owner'><configure xmlns='http://jabber.org/protocol/pubsub#owner' /></pubsub></iq>" % self.xmpp.default_ns), self.handleConfigureNode)) 
 		self.xmpp.registerHandler(Callback('pubsub get configure', MatchXMLMask("<iq xmlns='%s' type='get'><pubsub xmlns='http://jabber.org/protocol/pubsub#owner'><configure xmlns='http://jabber.org/protocol/pubsub#owner' /></pubsub></iq>" % self.xmpp.default_ns), self.handleGetNodeConfig)) 
 		self.xmpp.registerHandler(Callback('pubsub defaultconfig', MatchXMLMask("<iq xmlns='%s' type='get'><pubsub xmlns='http://jabber.org/protocol/pubsub#owner'><default xmlns='http://jabber.org/protocol/pubsub#owner' /></pubsub></iq>" % self.xmpp.default_ns), self.handleGetDefaultConfig)) 
@@ -44,7 +49,7 @@ class PublishSubscribe(object):
 			self.xmpp.sendPresence(pto=jid, ptype='probe', pfrom=pfrom)
 			self.xmpp.sendPresence(pto=jid, pfrom=pfrom)
 
-	def handleGotOnline(self, pres)
+	def handleGotOnline(self, pres):
 		pfrom = pres['to'].user
 		if pfrom: pfrom += "@"
 		pfrom += self.xmpp.jid
@@ -54,20 +59,19 @@ class PublishSubscribe(object):
 		ifrom = pres['from'].bare
 		ito = pres['to'].bare
 		subto, subfrom = self.db.getRosterJid(ifrom)
-		if pres['to'] == self.xmpp.jid:
-			if event['type'] == 'subscribe':
+		if True: # pres['to'] == self.xmpp.jid:
+			if pres['type'] == 'subscribe':
 				if not subto:
-					print("sending out subscribed")
 					self.xmpp.sendPresenceSubscription(pto=ifrom, pfrom=ito, ptype='subscribed')
 					self.db.setRosterTo(ifrom, True, ito)
 				if not subfrom:
 					self.xmpp.sendPresenceSubscription(pto=ifrom, pfrom=ito, ptype='subscribe')
 				self.xmpp.sendPresence(pto=ifrom)
-			elif event['type'] == 'unsubscribe':
+			elif pres['type'] == 'unsubscribe':
 				self.xmpp.sendPresenceSubscription(pto=ifrom,  pfrom=ito, ptype='unsubscribed')
 				self.xmpp.sendPresenceSubscription(pto=ifrom,  pfrom=ito, ptype='unsubscribe')
 				self.db.clearRoster(ifrom)
-			elif event['type'] == 'subscribed':
+			elif pres['type'] == 'subscribed':
 				if not subfrom:
 					self.db.setRosterFrom(ifrom, True)
 				if not subto:
@@ -116,6 +120,16 @@ class PublishSubscribe(object):
 		self.node_classes[nodeclass.nodetype] = nodeclass
 		self.default_config.field['pubsub#node_type'].addOption(nodeclass.nodetype, nodeclass.nodetype.title())
 	
+	def deleteNode(self, node):
+		if node in self.nodes:
+			del self.nodes[node]
+			self.nodeset.discard(node)
+			
+			self.db.deleteNode(node)
+			return True
+		else:
+			return False
+	
 	def handlePublish(self, stanza):
 		"""iq/{http://jabber.org/protocol/pubsub}pubsub/{http://jabber.org/protocol/pubsub}publish"""
 		node = self.nodes.get(stanza['pubsub']['publish']['node'])
@@ -128,10 +142,10 @@ class PublishSubscribe(object):
 		stanza.reply()
 		stanza['pubsub'].clear()
 		for id in ids:
-			stanza.append(Pubsub.Item({'id': id})
+			stanza.append(Pubsub.Item({'id': id}))
 		stanza.send()
 	
-	def publish(self, node, item, id, who=None):
+	def publish(self, node, item, id=None, who=None):
 		if isinstance(node, str):
 			node = self.nodes.get(node)
 		return node.publish(item, id, who=who)
@@ -191,22 +205,22 @@ class PublishSubscribe(object):
 	def subscribeNode(self, node, jid, who=None, to=None):
 		if node not in self.nodeset:
 			return False
-		return self.nodes[node].subscribe(jid, who)
+		return self.nodes[node].subscribe(jid, who, to=to)
 	
 	def handleSubscribe(self, stanza):
-		xml = stanza.xml
-		subscribe = xml.find('{http://jabber.org/protocol/pubsub}pubsub/{http://jabber.org/protocol/pubsub}subscribe')
-		node = subscribe.get('node')
-		jid = subscribe.get('jid')
-		subid = self.subscribeNode(self, node, jid, xml.get('from'))
+		node = stanza['pubsub']['subscribe']['node']
+		jid = stanza['pubsub']['subscribe']['jid'].full
+		subid = self.subscribeNode(node, jid, stanza['from'].bare)
 		if not subid:
 			self.xmpp.send(self.xmpp.makeIqError(xml.get('id')))
 			return
-		iq = self.xmpp.makeIqResult(xml.get('id'))
-		iq.attrib['from'] = self.xmpp.jid
-		iq.attrib['to'] = xml.get('from')
-		#TODO pass back subscription id
-		self.xmpp.send(iq)
+		stanza.reply()
+		stanza.clear()
+		stanza['pubsub']['subscription']['subid'] = subid
+		stanza['pubsub']['subscription']['node'] = node
+		stanza['pubsub']['subscription']['jid'] = jid
+		stanza['pubsub']['subscription']['subscription'] = 'subscribed'
+		stanza.send()
 	
 	def handleUnsubscribe(self, stanza):
 		xml = stanza.xml
@@ -222,6 +236,13 @@ class PublishSubscribe(object):
 		iq.attrib['from'] = self.xmpp.jid
 		iq.attrib['to'] = xml.get('from')
 		self.xmpp.send(iq)
+	
+	def unsubscribeNode(node, jid, who=None, subid=None):
+		if node in self.nodes:
+			self.nodes[node].unsubscribe(jid, who, subid)
+			return True
+		else:
+			return False
 	
 	def getNodeConfig(self, node):
 		if node not in self.nodeset:

@@ -35,7 +35,7 @@ if __name__ == '__main__':
 	xmpp.registerPlugin('xep_0045')
 	xmpp.registerPlugin('xep_0050')
 	xmpp.registerPlugin('xep_0060')
-	pubsub = sleekpubsub.PublishSubscribe(xmpp, config.get('pubsub', 'dbfile'))
+	pubsub = sleekpubsub.PublishSubscribe(xmpp, config.get('pubsub', 'dbfile'), config)
 	pubsub.registerNodeType(sleekpubsub.jobnode)
 	if xmpp.connect():
 		xmpp.process(threaded=False)

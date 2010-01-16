@@ -8,16 +8,21 @@ import pickle
 import time
 
 class Subscription(object):
-	def __init__(self, node, jid=None, subid=None, config=None):
+	def __init__(self, node, jid=None, subid=None, config=None, to=None):
 		self.node = node
 		self.jid = jid
 		self.subid = subid
 		self.config = config
+		self.to = to
 	
-	def set(self, jid, subid, config):
+	def set(self, jid, subid, config, to=None):
 		self.jid = jid
 		self.subid = subid
 		self.config = config
+		self.to = to or self.to
+	
+	def getto(self):
+		return self.to
 	
 	def getjid(self):
 		return self.jid
@@ -130,17 +135,19 @@ class BaseNode(object):
 	def getAffiliations(self):
 		return self.affiliations
 	
-	def subscribe(self, jid, who=None, config=None):
+	def subscribe(self, jid, who=None, config=None, to=None):
 		subid = uuid.uuid4().hex
 		if config is not None:
 			config = ET.tostring(config.getXML('submit'))
-		self.subscriptions[subid] = Subscription(self, jid, subid, config)
+		self.subscriptions[subid] = Subscription(self, jid, subid, config, to)
 		self.subscriptionsbyjid[jid] = self.subscriptions[subid]
-		self.db.addSubscription(self.name, jid, subid, config)
+		self.db.addSubscription(self.name, jid, subid, config, to)
 		return subid
 		#TODO modify affiliation
 
 	def unsubscribe(self, jid, who=None, subid=None):
+		if subid is None:
+			subid = self.subscriptionsbyjid[jid].getsubid()
 		self.db.deleteSubscription(self.name, jid, subid)
 		try:
 			del self.subscriptions[subid]
@@ -169,9 +176,10 @@ class BaseNode(object):
 		for subid in self.subscriptions:
 			subscriber = self.subscriptions[subid]
 			jid = subscriber.getjid()
+			to = subscriber.getto()
 			logging.debug("%s: %s %s" % (jid, '/' in jid, self.config.get('pubsub#presence_based_delivery', False)))
 			if '/' in jid or not self.config.get('pubsub#presence_based_delivery', False):
-					yield jid
+					yield jid, to
 			else:
 				for resource in self.xmpp.roster.get(jid, {'presence': []})['presence']:
 					yield "%s/%s" % (jid, resource)
@@ -244,11 +252,17 @@ class BaseNode(object):
 		item.append(payload)
 		items.append(item)
 		xevent.append(items)
-		msg.append(xevent)
-		for jid in self.eachSubscriber(): 
+		if payload.tag == '{jabber:client}body':
+			msg['body'] = payload.text
+			msg['type'] = 'chat'
+		else:
+			msg.append(xevent)
+		for jid, to in self.eachSubscriber(): 
 			if not event.hasJid(jid):
 				event.addJid(jid)
 				msg.attrib['to'] = jid
+				print("Message is from", to)
+				msg['from'] = to or self.xmpp.jid
 				self.xmpp.send(msg)
 	
 	def notifyConfig(self):

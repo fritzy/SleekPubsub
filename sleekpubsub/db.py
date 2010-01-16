@@ -88,6 +88,18 @@ class PubsubDB(object):
 		self.conn.commit()
 		c.close()
 	
+	def deleteNode(self, node):
+		self.win.put((None, self._deleteNode, (node,)))
+
+	def _deleteNode(self, node):
+		c = self.conn.cursor()
+		c.execute("select id from node where name=?", (node,))
+		id = c.fetchone()[0]
+		c.execute('delete from node where id=?', (id,))
+		c.execute('delete from subscription where node_id=?', (id,))
+		self.conn.commit()
+		c.close()
+	
 	def createNode(self, node, config, affiliations, items={}):
 		self.win.put((None, self._createNode, (node, config, affiliations, items)))
 	
@@ -133,16 +145,16 @@ class PubsubDB(object):
 		self.conn.commit()
 		c.close()
 	
-	def addSubscription(self, node, jid, subid, config=None):
-		self.win.put((None, self._addSubscription, (node, jid, subid, config)))
+	def addSubscription(self, node, jid, subid, config=None, to=None):
+		self.win.put((None, self._addSubscription, (node, jid, subid, config, to)))
 
-	def _addSubscription(self, node, jid, subid, config=None):
+	def _addSubscription(self, node, jid, subid, config=None, to=None):
 		if config is not None:
 			config = ET.tostring(config.getXML())
 		c = self.conn.cursor()
 		c.execute('select id from node where name=?', (node,))
 		id = c.fetchone()[0]
-		c.execute('insert into subscription (node_id, jid, config, subid) values (?,?,?,?)', (id, jid, config, subid))
+		c.execute('insert into subscription (node_id, jid, config, subid, jidto) values (?,?,?,?,?)', (id, jid, config, subid, to))
 		self.conn.commit()
 		c.close()
 	

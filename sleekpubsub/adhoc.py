@@ -84,7 +84,7 @@ class PubsubAdhoc(object):
 		value = form.getValues()
 		node = value.get('node')
 		jid = value.get('jid')
-		if self.ps.subscribeNode(node, jid, who=self.adhoc.sessions[sessid]['jid']):
+		if self.ps.subscribeNode(node, jid, who=self.adhoc.sessions[sessid]['jid'], to=self.adhoc.sessions[sessid]['to']):
 			return self.getStatusForm('Done', "Subscribed to node %s." % node), None, False
 		return self.getStatusForm('Error', "Could not subscribe to %s." % node), None, False
 	
