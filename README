@@ -1,0 +1,47 @@
+SleekPubsub is an XMPP Publish-Subscribe implementation that aims to be a creative and flexible solution to your publish-subscribe needs.
+SleekPubsub implements a XEP-0060 interface, an HTTP RESTful interface, a XEP-0050 (Ad Hoc Commands) interface, and a bot/chat interface.
+
+Unusual Features
+----------------
+- many node types -- start by overriding leaf and create your own behavior
+- <body xmlns='jabber:client' /> payloads can optionally create chat IM without pubsub payload.
+- subscribe to the component and it can automatically subscribe you to a node
+- subscribe to a node and the full jid that you subscribe to can be the source of all of your updates, rather than the bare component jid
+
+RESTful Interface
+-----------------
+All HTTP calls are protected with http-auth which is configured in the ini [rest] section
+
+So far:
+
+POST	/node/[node]
+	create or reconfigure node w/ config via json
+
+GET		/node/[node]
+	retrieve config in json
+
+DELETE	/node/[node]
+	remove a node
+
+GET		/subscribe/[node]?jid=[jid]
+	subscribe a jid to node
+
+GET		/unsubscribe/[node]?jid=[jid]&subid=[subscription id]
+	unsubscribe a jid from a node
+
+POST	/publish/[node]
+	publish to a node via xml body
+
+Requirements
+------------
+SleekXMPP github master (will tag a release soon)
+Python 3.x (will make 2.6 compatible soon)
+
+Quickstart
+----------
+See INSTALL file
+
+Credits
+-------
+Author: Nathan Fritz
+jid: fritzy@netflint.net

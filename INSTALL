@@ -1,0 +1,27 @@
+Pre-requisites
+--------------
+Python 3.1 (this is an unusual requirement for these days, a 2.6 version is coming)
+sqlite3 installed
+
+Database
+--------
+sqlite3 pubsub.db < cat sqliteschema.sql
+
+XMPP Server
+-----------
+Run an XMPP server (Tigase, Prosody, Ejabberd should all work fine)
+Configure XEP-0114 Component -- keep in mind the domain and password you set
+
+Config.ini
+----------
+1. cp exampleconfig.ini config.ini
+2. edit the file, make sure you match the domain to 'host' and password to
+'secret' in the [pubsub] section to the server component you configured.
+3. set the rest section to listen to the server and port you desire
+The username/password in this section sets up http-auth for the restful
+interface.
+
+Starting the service
+--------------------
+#publish_subscribe.py does not yet daemonize, so redirect output
+python3 publish_subscribe.py -c config.ini
