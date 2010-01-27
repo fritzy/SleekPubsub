@@ -1,9 +1,26 @@
 from __future__ import with_statement
-import _thread as thread
+try:
+	import _thread as thread
+except ImportError:
+	import thread
 import logging, urllib, base64, time, os, socket, re, datetime, signal, traceback
-from http.server import HTTPServer as BaseHTTPServer
-from socketserver import BaseServer
-import http.server
+
+
+try:
+	from http.server import HTTPServer as BaseHTTPServer
+except ImportError:
+	from BaseHTTPServer import HTTPServer as BaseHTTPServer
+
+try:
+	from socketserver import BaseServer
+except ImportError:
+	from SocketServer import BaseServer
+
+try:
+	import http.server as httpserver
+except ImportError:
+	import BaseHTTPServer as httpserver
+
 import json
 from xml.etree import cElementTree as ET
 
@@ -89,16 +106,16 @@ class RESTHTTPServer(BaseHTTPServer):
 			#print "Starting thread"
 			thread.start_new(self.process_request, (request, client_address))
 
-http.server.BaseHTTPRequestHandler.protocol_version = "HTTP/1.1"
+httpserver.BaseHTTPRequestHandler.protocol_version = "HTTP/1.1"
 
-class http_handler(http.server.BaseHTTPRequestHandler):
+class http_handler(httpserver.BaseHTTPRequestHandler):
 	"""Extension on BaseHTTPRequestHandler.  This is our actual "server"."""
 
 	def __init__(self, request, client_address, server):
 		self.querystring = None
 		self.postargs = None
 		self.request_type = 'GET'
-		http.server.BaseHTTPRequestHandler.__init__(self, request, client_address, server)
+		httpserver.BaseHTTPRequestHandler.__init__(self, request, client_address, server)
 
 	def setup(self):
 		"""initial connection setup, setting rfile, wfile, and connection"""
@@ -107,12 +124,12 @@ class http_handler(http.server.BaseHTTPRequestHandler):
 			self.rfile = socket._fileobject(self.request, "rb", self.rbufsize)
 			self.wfile = socket._fileobject(self.request, "wb", self.wbufsize)
 		else:
-			http.server.BaseHTTPRequestHandler.setup(self)
+			httpserver.BaseHTTPRequestHandler.setup(self)
 
 	def handle_one_request(self):
 		"""Handle single HTTP request.  With SSL error catching."""
 		try:
-			http.server.BaseHTTPRequestHandler.handle_one_request(self)
+			httpserver.BaseHTTPRequestHandler.handle_one_request(self)
 		#except SSL.ZeroReturnError:
 		#	logging.log(logging.DEBUG, "SSL Connection closed cleanly.")
 		#	self.close_connection = 1

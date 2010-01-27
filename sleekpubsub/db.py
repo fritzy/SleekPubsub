@@ -1,7 +1,10 @@
 import sqlite3
 import pickle
 import threading
-import queue
+try:
+	import queue
+except ImportError:
+	import Queue as queue
 
 class PubsubDB(object):
 	

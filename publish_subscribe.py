@@ -4,7 +4,11 @@ import logging
 import sleekpubsub
 import sleekpubsub.jobnode
 
-import configparser
+try:
+	import configparser
+except ImportError:
+	import ConfigParser as configparser
+
 from optparse import OptionParser
 #import sleekxmpp.xmlstream.xmlstream
 
