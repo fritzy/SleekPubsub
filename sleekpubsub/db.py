@@ -1,6 +1,7 @@
 import sqlite3
 import pickle
 import threading
+import sys
 try:
 	import queue
 except ImportError:
@@ -28,6 +29,8 @@ class PubsubDB(object):
 	
 	def dbStartRead(self):
 		self.rconn = sqlite3.connect(self.file)
+		if sys.version_info < (3, 0):
+			self.rconn.text_factory = str
 		while True:
 			reply, pointer, args = self.rin.get(block=True)
 			result = pointer(*args)
