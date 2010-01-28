@@ -14,6 +14,9 @@ All HTTP calls are protected with http-auth which is configured in the ini [rest
 
 So far:
 
+GET		/default
+	get the default config in json
+
 POST	/node/[node]
 	create or reconfigure node w/ config via json
 

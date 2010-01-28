@@ -3,7 +3,14 @@ try:
 	import _thread as thread
 except ImportError:
 	import thread
-import logging, urllib, base64, time, os, socket, re, datetime, signal, traceback
+import sys
+
+import logging, base64, time, os, socket, re, datetime, signal, traceback
+
+if sys.version_info < (3,0):
+	import urllib
+else:
+	import urllib.parse as urllib
 
 
 try:
@@ -171,7 +178,10 @@ class http_handler(httpserver.BaseHTTPRequestHandler):
 				self.send_header("Content-Length", len(result))
 				self.send_header("Cache-Control", "no-cache")
 				self.end_headers()
-				self.wfile.write(bytes(result, 'utf8'))
+				if sys.version_info < (3,0):
+					self.wfile.write(result)
+				else:
+					self.wfile.write(bytes(result, 'utf8'))
 			else:
 				self._404Page()
 		except socket.error as e:
@@ -247,8 +257,8 @@ class http_handler(httpserver.BaseHTTPRequestHandler):
 		vars = {}
 		for set in data.split('&'):
 			name, value = set.split('=')
-			value = urllib.parse.unquote(value.replace('+', ' '))
-			name = urllib.parse.unquote(name)
+			value = urllib.unquote(value.replace('+', ' '))
+			name = urllib.unquote(name)
 			if '[' in name:
 				name, index = name[:-1].split('[')
 				if not vars.has_key(name):
@@ -273,7 +283,7 @@ class http_handler(httpserver.BaseHTTPRequestHandler):
 		if self.querystring is not None:
 			args.update(self._parsePost())
 		action, data = self.getAction(path)
-		data = urllib.parse.unquote(data)
+		data = urllib.unquote(data)
 		return (domain, action, data, args)
 		
 	def getAction(self, path):
@@ -295,9 +305,9 @@ class http_handler(httpserver.BaseHTTPRequestHandler):
 			if argset:
 				if "=" in argset:
 					var, value = argset.split('=', 1)
-					vars[urllib.parse.unquote(var)] = urllib.parse.unquote(value)
+					vars[urllib.unquote(var)] = urllib.unquote(value)
 				else:
-					vars[urllib.parse.unquote(argset)] = None
+					vars[urllib.unquote(argset)] = None
 		return vars
 	
 	def _301Page(self, redirect):
@@ -320,7 +330,10 @@ class http_handler(httpserver.BaseHTTPRequestHandler):
 		self.send_header("Content-type", "text/html")
 		self.send_header("Content-Length", len(msg))
 		self.end_headers()
-		self.wfile.write(bytes(msg, 'utf8'))
+		if sys.version_info < (3,0):
+			self.wfile.write(msg)
+		else:
+			self.wfile.write(bytes(msg, 'utf8'))
 
 	def _404Page(self):
 		"""Show 404 page"""
@@ -340,11 +353,14 @@ class http_handler(httpserver.BaseHTTPRequestHandler):
 		username = password = None
 		if auth and auth.startswith("Basic "):
 			authstring = auth.partition(" ")[2]
-			authstring = base64.decodebytes(bytes(authstring, 'utf8'))
+			if sys.version_info < (3,0):
+				authstring = base64.decodestring(authstring)
+			else:
+				authstring = base64.decodebytes(bytes(authstring, 'utf8'))
 			if authstring.count(b":") == 1:
 				username, password = authstring.split(b":")
-				username = urllib.parse.unquote(username.decode('utf8'))
-				password = urllib.parse.unquote(password.decode('utf8'))
+				username = urllib.unquote(username.decode('utf8'))
+				password = urllib.unquote(password.decode('utf8'))
 		if username is not None and password is not None:
 			return username, password
 		return None, None
@@ -365,6 +381,14 @@ class RestHandler(object):
 	
 	def do_DELETE(self, domain, controller, obj, args):
 		return 'This object does not support DELETE.', 'text/plain'
+
+class DefaultHandler(RestHandler):
+	
+	def do_GET(self, domain, controller, obj, args):
+		form = self.app.pubsub.getDefaultConfig()
+		if not form:
+			return json.dumps({'error': True}), 'text/plain'
+		return json.dumps(form.getValues()), 'text/plain'
 
 class NodeHandler(RestHandler):
 	
@@ -416,6 +440,7 @@ class HTTPD(object):
 		self.pubsub = pubsub
 		self.jid = self.pubsub.config.get('rest', 'userasjid')
 		self.rest_handlers = {
+			"default": DefaultHandler(self),
 			"node": NodeHandler(self),
 			"subscribe": SubscribeHandler(self),
 			"unsubscribe": UnSubscribeHandler(self),
