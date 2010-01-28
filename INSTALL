@@ -23,5 +23,5 @@ interface.
 
 Starting the service
 --------------------
-#publish_subscribe.py does not yet daemonize, so redirect output
-python3 publish_subscribe.py -c config.ini
+#--daemon is optional, omit to run at console
+python3 publish_subscribe.py -c config.ini --daemon
