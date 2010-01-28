@@ -35,6 +35,20 @@ GET		/unsubscribe/[node]?jid=[jid]&subid=[subscription id]
 POST	/publish/[node]
 	publish to a node via xml body
 
+**NOTE: POSTS needs to be content-type of text/json or text/xml
+
+
+Usage: publish_subscribe.py [options]
+-------------------------------------
+Options:
+  -h, --help            show this help message and exit
+  --daemon              run as daemon
+  -q, --quiet           set logging to ERROR
+  -d, --debug           set logging to DEBUG
+  -v, --verbose         set logging to COMM
+  -c CONFIGFILE, --config=CONFIGFILE
+                        set config file to use
+
 Requirements
 ------------
 SleekXMPP github master (will tag a release soon)
@@ -47,4 +61,4 @@ See INSTALL file
 Credits
 -------
 Author: Nathan Fritz
-jid: fritzy@netflint.net
+jid: xmpp:fritzy@netflint.net
