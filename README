@@ -1,6 +1,13 @@
 SleekPubsub is an XMPP Publish-Subscribe implementation that aims to be a creative and flexible solution to your publish-subscribe needs.
 SleekPubsub implements a XEP-0060 interface, an HTTP RESTful interface, a XEP-0050 (Ad Hoc Commands) interface, and a bot/chat interface.
 
+Credits
+-------
+Author: Nathan Fritz
+jid: xmpp:fritzy@netflint.net
+
+Contributors: Michael Garvin
+
 Unusual Features
 ----------------
 - many node types -- start by overriding leaf and create your own behavior
@@ -14,7 +21,7 @@ All HTTP calls are protected with http-auth which is configured in the ini [rest
 
 So far:
 
-GET		/default
+GET		/default/
 	get the default config in json
 
 POST	/node/[node]
@@ -58,7 +65,6 @@ Quickstart
 ----------
 See INSTALL file
 
-Credits
+Gotchas
 -------
-Author: Nathan Fritz
-jid: xmpp:fritzy@netflint.net
+- The sqlite3 db will not work if you switch between python2.6 and 3.x
