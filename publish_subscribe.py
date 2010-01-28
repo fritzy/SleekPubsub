@@ -95,17 +95,19 @@ if __name__ == '__main__':
 
 	if opts.daemonize:
 		retCode = createDaemon()
+		rootlogger = logging.getLogger('')
+		rootlogger.setLevel(loglevel)
+		formatter = logging.Formatter('%(levelname)-8s %(message)s')
+		handler = logging.handlers.RotatingFileHandler(logfile)
+		handler.setFormatter(formatter)
+		rootlogger.addHandler(handler)
+	else:
+		logging.basicConfig(level=opts.loglevel, format='%(levelname)-8s %(message)s')
 
 	f = open(config.get('pubsub', 'pid'), 'w')
 	f.write("%s" % os.getpid())
 	f.close()
 	
-	rootlogger = logging.getLogger('')
-	rootlogger.setLevel(loglevel)
-	formatter = logging.Formatter('%(levelname)-8s %(message)s')
-	handler = logging.handlers.RotatingFileHandler(logfile)
-	handler.setFormatter(formatter)
-	rootlogger.addHandler(handler)
 
 	xmpp = sleekxmpp.componentxmpp.ComponentXMPP(config.get('pubsub', 'host'), config.get('pubsub', 'secret'), config.get('pubsub', 'server'), config.getint('pubsub', 'port'))
 	xmpp.registerPlugin('xep_0004')
