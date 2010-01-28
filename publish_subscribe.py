@@ -37,16 +37,16 @@ def createDaemon():
 
 	try:
 		pid = os.fork()
-	except OSError, e:
-		raise Exception, "%s [%d]" % (e.strerror, e.errno)
+	except OSError as e:
+		raise Exception("%s [%d]" % (e.strerror, e.errno))
 
 	if pid == 0: #The first child
 		os.setsid() #Become session leader of this new session.  Also be guaranteed not to have a controlling terminal
 
 		try:
 			pid = os.fork() #Fork a second child
-		except OSError, e:
-			raise Exception, "%s [%d]" % (e.strerror, e.errno)
+		except OSError as e:
+			raise Exception("%s [%d]" % (e.strerror, e.errno))
 
 		if pid == 0: #The second child
 			os.chdir(WORKDIR) #TODO define WORKDIR in ini
