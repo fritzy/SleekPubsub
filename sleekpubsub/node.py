@@ -182,7 +182,7 @@ class BaseNode(object):
 					yield jid, to
 			else:
 				for resource in self.xmpp.roster.get(jid, {'presence': []})['presence']:
-					yield "%s/%s" % (jid, resource)
+					yield "%s/%s" % (jid, resource), to
 	
 	def publish(self, item, item_id=None, options=None, who=None):
 		if item_id is None:
@@ -257,12 +257,12 @@ class BaseNode(object):
 			msg['type'] = 'chat'
 		else:
 			msg.append(xevent)
-		for jid, to in self.eachSubscriber(): 
+		for jid, mto in self.eachSubscriber(): 
 			if not event.hasJid(jid):
 				event.addJid(jid)
 				msg.attrib['to'] = jid
-				print("Message is from", to)
-				msg['from'] = to or self.xmpp.jid
+				print("Message is from", mto)
+				msg['from'] = mto or self.xmpp.jid
 				self.xmpp.send(msg)
 	
 	def notifyConfig(self):

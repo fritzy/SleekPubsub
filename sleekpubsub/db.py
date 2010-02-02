@@ -145,10 +145,10 @@ class PubsubDB(object):
 			c.execute('update node set config=? where name=?', (config, node))
 		updates = [(id, item_name, items[item_name].getpayload(), items[item_name].gettime(), items[item_name].getwho()) for item_name in items]
 		for update in updates:
-			c.execute('replace in item (node_id, name, payload, time, who) values (?,?,?,?,?)', update)
+			c.execute('replace into item (node_id, name, payload, time, who) values (?,?,?,?,?)', update)
 		updates = [(id, sub.getjid(), sub.getconfig(), sub.getid()) for sub in subscriptions]
 		for update in updates:
-			c.execute('replace in subscription (node_id, jid, config, subid) values (?,?,?,?)', update)
+			c.execute('replace into subscription (node_id, jid, config, subid) values (?,?,?,?)', update)
 		self.conn.commit()
 		c.close()
 	
