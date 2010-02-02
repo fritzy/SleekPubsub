@@ -103,6 +103,7 @@ class PubsubDB(object):
 		id = c.fetchone()[0]
 		c.execute('delete from node where id=?', (id,))
 		c.execute('delete from subscription where node_id=?', (id,))
+		c.execute('delete from affiliation where node_id=?', (id,))
 		self.conn.commit()
 		c.close()
 	
