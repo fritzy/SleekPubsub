@@ -8,6 +8,7 @@ from xml.etree import cElementTree as ET
 
 class JobItem(Item):
 	states = ('new', 'claimed', 'processing', 'finished')
+
 	def __init__(self, *args, **dargs):
 		Item.__init__(self, *args, **dargs)
 		self.state = 'new'
@@ -40,13 +41,14 @@ class JobItem(Item):
 	
 class JobNode(BaseNode):
 	nodetype = 'job'
+	affiliationtypes = ('owner', 'publisher', 'member', 'outcast', 'pending', 'monitor')
 
 	def __init__(self, *args, **dargs):
 		BaseNode.__init__(self, *args, **dargs)
 		self.item_class = JobItem
 	
 	def eachJobListener(self, item):
-		return [item.who]
+		return [item.who] + self.affilitions['monitor']
 	
 	def notifyState(self, event, state):
 		item_id = event.item.name

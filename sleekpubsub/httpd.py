@@ -435,6 +435,11 @@ class PublishHandler(RestHandler):
 		else:
 			return json.dumps({'error': True}), 'text/plain'
 		
+class AffiliationHandler(RestHandler):
+	def do_POST(self, domain, controller, obj, args):
+		worked = self.app.pubsub.modifyAffiliations(obj, args.get('__data__'))
+		return json.dumps({'error': !worked}), 'text/plain'
+	
 class HTTPD(object):
 	def __init__(self, pubsub):
 		self.pubsub = pubsub
@@ -445,6 +450,7 @@ class HTTPD(object):
 			"subscribe": SubscribeHandler(self),
 			"unsubscribe": UnSubscribeHandler(self),
 			"publish": PublishHandler(self),
+			"affiliation": AffiliationHandler(self),
 		}
 		self.httpd = RESTHTTPServer((self.pubsub.config.get('rest', 'server'), self.pubsub.config.getint('rest', 'port')), http_handler, rest_handlers=self.rest_handlers, userpass=(self.pubsub.config.get('rest', 'user'), self.pubsub.config.get('rest', 'passwd')))
 		thread.start_new(self.process_request, tuple())

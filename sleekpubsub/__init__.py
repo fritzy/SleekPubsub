@@ -130,6 +130,12 @@ class PublishSubscribe(object):
 		else:
 			return False
 	
+	def modifyAffiliations(node, updates={}):
+		if node in self.nodes:
+			return self.nodes[node].modifyAffiliations(updates)
+		else:
+			return False
+	
 	def handlePublish(self, stanza):
 		"""iq/{http://jabber.org/protocol/pubsub}pubsub/{http://jabber.org/protocol/pubsub}publish"""
 		node = self.nodes.get(stanza['pubsub']['publish']['node'])

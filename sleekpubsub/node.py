@@ -104,7 +104,10 @@ class BaseNode(object):
 		self.itemorder = []
 		self.synch = True
 		self.item_class = Item
-		self.affiliations = {'owner': [], 'publisher': [], 'member': [], 'outcast': [], 'pending': []}
+		#self.affiliations = {'owner': [], 'publisher': [], 'member': [], 'outcast': [], 'pending': []}
+		self.affiliations = {}
+		for afftype in self.affiliationtypes:
+			self.affiliations[afftype] = []
 		self.subscriptions = {}
 		self.subscriptionsbyjid = {}
 		if self.new_owner is not None:
@@ -239,6 +242,7 @@ class BaseNode(object):
 				return False
 		self.affilaitions.update(affiliations)
 		self.db.synch(self.name, affiliations=self.affiliations)
+		return True
 
 	
 	def notifyItem(self, event):
