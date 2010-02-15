@@ -73,11 +73,8 @@ class RESTHTTPServer(BaseHTTPServer):
 	def process_request(self, request, client_address):
 		"""finish and close request, handling any errors encountered."""
 		try:
-			#print "start request"
 			self.finish_request(request, client_address)
-			#print "ok"
 			self.close_request(request)
-			#print "ok2"
 		except socket.error as e:
 			if e.errno == 104:
 				logging.log(logging.DEBUG, "Remote end closed connection.  Probably IE")
@@ -110,8 +107,8 @@ class RESTHTTPServer(BaseHTTPServer):
 			with self.lock:
 				self.threads += 1
 			logging.log(logging.DEBUG, "%s threads" % self.threads)
-			#print "Starting thread"
-			thread.start_new(self.process_request, (request, client_address))
+			#thread.start_new(self.process_request, (request, client_address))
+			self.process_request(request, client_address)
 
 httpserver.BaseHTTPRequestHandler.protocol_version = "HTTP/1.1"
 
@@ -159,11 +156,13 @@ class http_handler(httpserver.BaseHTTPRequestHandler):
 		self.close_connection = 1
 	
 	def do_GET(self):
+		logging.debug("Doing a GET")
 		if self.server.userpass is not None:
 			username, password = self._getAuth()
 			if not self.server.userpass == (username, password):
 				return self._401Page()
 		domain, controller, robject, args = self._parsePath(self.path)
+		logging.debug((domain, controller, robject, args))
 		if self.postargs:
 			args.update(self.postargs)
 		self.postargs = None
@@ -417,8 +416,14 @@ class NodeHandler(RestHandler):
 		
 class SubscribeHandler(RestHandler):
 	def do_GET(self, domain, controller, obj, args):
-		self.app.pubsub.subscribeNode(obj, args['jid'], to=args.get('to'))
-		return json.dumps({'error': False}), 'text/plain'
+		logging.debug("Handling subscription")
+		try:
+			self.app.pubsub.subscribeNode(obj, args['jid'], to=args.get('to'), who=self.app.jid)
+			logging.debug("Done, son")
+			return json.dumps({'error': False}), 'text/plain'
+		except:
+			logging.error(traceback.format_exc())
+		return json.dumps({'error': True}), 'text/plain'
 
 class UnSubscribeHandler(RestHandler):
 	def do_GET(self, domain, controller, obj, args):
@@ -437,8 +442,19 @@ class PublishHandler(RestHandler):
 		
 class AffiliationHandler(RestHandler):
 	def do_POST(self, domain, controller, obj, args):
-		worked = self.app.pubsub.modifyAffiliations(obj, args.get('__data__'))
-		return json.dumps({'error': !worked}), 'text/plain'
+		worked = self.app.pubsub.modifyAffiliations(obj, args.get('__data__'), who=self.app.jid)
+		return json.dumps({'error': not(worked)}), 'text/plain'
+	
+	def do_GET(self, domain, controller, obj, args):
+		results = self.app.pubsub.getAffiliations(obj, who=self.app.jid)
+		if results:
+			return json.dumps(results), 'text/plain'
+		else:
+			return json.dumps({'error': False}), 'text/plain'
+
+class TestHandler(RestHandler):
+	def do_POST(self, domain, controller, obj, args):
+		return json.dumps({'error': False}), 'text/plain'
 	
 class HTTPD(object):
 	def __init__(self, pubsub):
@@ -451,6 +467,7 @@ class HTTPD(object):
 			"unsubscribe": UnSubscribeHandler(self),
 			"publish": PublishHandler(self),
 			"affiliation": AffiliationHandler(self),
+			"test": TestHandler(self),
 		}
 		self.httpd = RESTHTTPServer((self.pubsub.config.get('rest', 'server'), self.pubsub.config.getint('rest', 'port')), http_handler, rest_handlers=self.rest_handlers, userpass=(self.pubsub.config.get('rest', 'user'), self.pubsub.config.get('rest', 'passwd')))
 		thread.start_new(self.process_request, tuple())

@@ -87,6 +87,9 @@ if __name__ == '__main__':
 	optp.add_option("-c","--config", dest="configfile", default="config.ini", help="set config file to use")
 	opts,args = optp.parse_args()
 
+	if opts.daemonize:
+		retCode = createDaemon()
+	
 	config = configparser.RawConfigParser()
 	config.read(opts.configfile)
 	
@@ -94,7 +97,6 @@ if __name__ == '__main__':
 	logfile = config.get('settings', 'logfile')
 
 	if opts.daemonize:
-		retCode = createDaemon()
 		rootlogger = logging.getLogger('')
 		rootlogger.setLevel(loglevel)
 		formatter = logging.Formatter('%(levelname)-8s %(message)s')
@@ -108,7 +110,6 @@ if __name__ == '__main__':
 	f.write("%s" % os.getpid())
 	f.close()
 	
-
 	xmpp = sleekxmpp.componentxmpp.ComponentXMPP(config.get('pubsub', 'host'), config.get('pubsub', 'secret'), config.get('pubsub', 'server'), config.getint('pubsub', 'port'))
 	xmpp.registerPlugin('xep_0004')
 	xmpp.registerPlugin('xep_0030')

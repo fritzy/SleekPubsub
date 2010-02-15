@@ -139,13 +139,23 @@ class BaseNode(object):
 		return self.affiliations
 	
 	def subscribe(self, jid, who=None, config=None, to=None):
-		subid = uuid.uuid4().hex
-		if config is not None:
-			config = ET.tostring(config.getXML('submit'))
-		self.subscriptions[subid] = Subscription(self, jid, subid, config, to)
-		self.subscriptionsbyjid[jid] = self.subscriptions[subid]
-		self.db.addSubscription(self.name, jid, subid, config, to)
-		return subid
+		print(who, self.affiliations['owner'])
+		if (
+			(who is None or who in self.affiliations['owner'] or who.startswith(jid)) and 
+			(self.config['pubsub#access_model'] == 'open' or 
+				(self.config['pubsub#access_model'] == 'whitelist' and jid in self.affiliations['member']) or
+				(who in self.affiliations['owner'])
+			)
+		):
+			subid = uuid.uuid4().hex
+			if config is not None:
+				config = ET.tostring(config.getXML('submit'))
+			self.subscriptions[subid] = Subscription(self, jid, subid, config, to)
+			self.subscriptionsbyjid[jid] = self.subscriptions[subid]
+			self.db.addSubscription(self.name, jid, subid, config, to)
+			return subid
+		else:
+			return False
 		#TODO modify affiliation
 
 	def unsubscribe(self, jid, who=None, subid=None):
@@ -236,14 +246,20 @@ class BaseNode(object):
 	def modifySubscriptions(self, jids={}):
 		pass
 	
-	def modifyAffiliations(self, affiliations={}):
+	def modifyAffiliations(self, affiliations={}, who=None):
+		if who is not None and who not in self.affiliations['owner']:
+			return False
 		for key in affiliations:
 			if key not in self.affiliationtypes:
 				return False
-		self.affilaitions.update(affiliations)
+		self.affiliations.update(affiliations)
 		self.db.synch(self.name, affiliations=self.affiliations)
 		return True
-
+	
+	def getAffiliations(self, who=None):
+		if who is not None and who not in self.affiliations['owner']:
+			return False
+		return self.affiliations
 	
 	def notifyItem(self, event):
 		item_id = event.item.name
