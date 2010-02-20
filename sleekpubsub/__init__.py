@@ -94,7 +94,7 @@ class PublishSubscribe(object):
 		default_config.addField('pubsub#max_items', label='Max # of items to persist', value='10')
 		default_config.addField('pubsub#subscribe', 'boolean', label='Whether to allow subscriptions', value=True)
 		model = default_config.addField('pubsub#access_model', 'list-single', label='Specify the subscriber model', value='open')
-		model.addOption('authorize', 'Authorize')
+		#model.addOption('authorize', 'Authorize') # not yet implemented
 		model.addOption('open', 'Open')
 		model.addOption('whitelist', 'whitelist')
 		model = default_config.addField('pubsub#publish_model', 'list-single', label='Specify the publisher model', value='publishers')
@@ -127,6 +127,18 @@ class PublishSubscribe(object):
 			
 			self.db.deleteNode(node)
 			return True
+		else:
+			return False
+	
+	def modifyAffiliations(self, node, updates={}, who=None):
+		if node in self.nodes:
+			return self.nodes[node].modifyAffiliations(updates, who=who)
+		else:
+			return False
+	
+	def getAffiliations(self, node, who=None):
+		if node in self.nodes:
+			return self.nodes[node].getAffiliations(who=who)
 		else:
 			return False
 	

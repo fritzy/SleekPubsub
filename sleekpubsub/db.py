@@ -103,6 +103,7 @@ class PubsubDB(object):
 		id = c.fetchone()[0]
 		c.execute('delete from node where id=?', (id,))
 		c.execute('delete from subscription where node_id=?', (id,))
+		c.execute('delete from affiliation where node_id=?', (id,))
 		self.conn.commit()
 		c.close()
 	
@@ -144,7 +145,9 @@ class PubsubDB(object):
 			c.execute('update node set config=? where name=?', (config, node))
 		updates = [(id, item_name, items[item_name].getpayload(), items[item_name].gettime(), items[item_name].getwho()) for item_name in items]
 		for update in updates:
-			c.execute('replace into item (node_id, name, payload, time, who) values (?,?,?,?,?)', update)
+			pass
+			#print(update)
+			#c.execute('replace into item (node_id, name, payload, time, who) values (?,?,?,?,?)', update)
 		updates = [(id, sub.getjid(), sub.getconfig(), sub.getid()) for sub in subscriptions]
 		for update in updates:
 			c.execute('replace into subscription (node_id, jid, config, subid) values (?,?,?,?)', update)

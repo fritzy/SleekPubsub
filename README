@@ -42,6 +42,12 @@ GET		/unsubscribe/[node]?jid=[jid]&subid=[subscription id]
 POST	/publish/[node]
 	publish to a node via xml body
 
+GET		/affiliation/[node]
+	get node affiliations
+
+POST	/affiliations/[node]
+	update node affiliations
+
 **NOTE: POSTS needs to be content-type of text/json or text/xml
 
 
