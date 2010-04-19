@@ -29,10 +29,13 @@ class PublishSubscribe(object):
 		self.adhoc = PubsubAdhoc(self)
 		self.http = HTTPD(self)
 
-		self.xmpp.registerHandler(Callback('pubsub publish', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub'><publish xmlns='http://jabber.org/protocol/pubsub' /></pubsub></iq>" % self.xmpp.default_ns), self.handlePublish)) 
-		#self.xmpp.registerHandler(Callback('pubsub create', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub'><create xmlns='http://jabber.org/protocol/pubsub' /></pubsub></iq>" % self.xmpp.default_ns), self.handleCreateNode)) 
-		self.xmpp.registerHandler(Callback('pubsub create', StanzaPath("iq@type=set/pubsub/publish"), self.handleCreateNode)) 
-		self.xmpp.registerHandler(Callback('pubsub configure', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub#owner'><configure xmlns='http://jabber.org/protocol/pubsub#owner' /></pubsub></iq>" % self.xmpp.default_ns), self.handleConfigureNode)) 
+		#self.xmpp.registerHandler(Callback('pubsub publish', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub'><publish xmlns='http://jabber.org/protocol/pubsub' /></pubsub></iq>" % self.xmpp.default_ns), self.handlePublish)) 
+		self.xmpp.registerHandler(Callback('pubsub publish', StanzaPath("iq@type=set/pubsub/publish"), self.handlePublish)) 
+		self.xmpp.registerHandler(Callback('pubsub create', StanzaPath("iq@type=set/pubsub/create"), self.handleCreateNode)) 
+		self.xmpp.registerHandler(Callback('pubsub configure', StanzaPath("iq@type=set/pubsub_owner/configure"), self.handleConfigureNode))
+		self.xmpp.registerHandler(Callback('pubsub delete', StanzaPath('iq@type=set/pubsub_owner/delete'), self.handleDeleteNode))
+
+		#self.xmpp.registerHandler(Callback('pubsub configure', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub#owner'><configure xmlns='http://jabber.org/protocol/pubsub#owner' /></pubsub></iq>" % self.xmpp.default_ns), self.handleConfigureNode)) 
 		self.xmpp.registerHandler(Callback('pubsub get configure', MatchXMLMask("<iq xmlns='%s' type='get'><pubsub xmlns='http://jabber.org/protocol/pubsub#owner'><configure xmlns='http://jabber.org/protocol/pubsub#owner' /></pubsub></iq>" % self.xmpp.default_ns), self.handleGetNodeConfig)) 
 		self.xmpp.registerHandler(Callback('pubsub defaultconfig', MatchXMLMask("<iq xmlns='%s' type='get'><pubsub xmlns='http://jabber.org/protocol/pubsub#owner'><default xmlns='http://jabber.org/protocol/pubsub#owner' /></pubsub></iq>" % self.xmpp.default_ns), self.handleGetDefaultConfig)) 
 		self.xmpp.registerHandler(Callback('pubsub subscribe', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub'><subscribe xmlns='http://jabber.org/protocol/pubsub' /></pubsub></iq>" % self.xmpp.default_ns), self.handleSubscribe)) 
@@ -130,6 +133,15 @@ class PublishSubscribe(object):
 		else:
 			return False
 	
+	def handleDeleteNode(self, stanza):
+		if self.deleteNode(stanza['pubsub_owner']['delete']['node']):
+			stanza.reply().send()
+		else:
+			stanza.reply()
+			stanza['type'] = 'error'
+			stanza.send()
+		
+	
 	def modifyAffiliations(self, node, updates={}, who=None):
 		if node in self.nodes:
 			return self.nodes[node].modifyAffiliations(updates, who=who)
@@ -148,13 +160,13 @@ class PublishSubscribe(object):
 		ids = []
 		if node is None:
 			raise XMPPError('item-not-found')
-		for item in stanza['pubsub']['publish']:
+		for item in stanza['pubsub']['publish']['items']:
 			item_id = self.publish(stanza['pubsub']['publish']['node'], item['payload'], item['id'], stanza['from'].bare)
 			ids.append(item_id)
 		stanza.reply()
-		stanza['pubsub'].clear()
+		#stanza['pubsub'].clear()
 		for id in ids:
-			stanza.append(Pubsub.Item({'id': id}))
+			stanza['pubsub']['publish']['items'].append(Pubsub.Item({'id': id}))
 		stanza.send()
 	
 	def publish(self, node, item, id=None, who=None):
@@ -164,7 +176,7 @@ class PublishSubscribe(object):
 	
 	def handleGetDefaultConfig(self, stanza):
 		stanza.reply()
-		stanza['pubsub']['default']['config'] = self.default_config
+		stanza['pubsub_owner']['default']['config'] = self.default_config
 		stanza.send()
 	
 	def createNode(self, node, config=None, who=None):
@@ -184,13 +196,14 @@ class PublishSubscribe(object):
 	
 	def handleCreateNode(self, iq):
 		node = iq['pubsub']['create']['node'] or uuid.uuid4().hex
-		config = iq['pubsub']['create']['configure']['config'] or self.default_config
+		config = iq['pubsub']['configure']['config'] or self.default_config
+		logging.debug("Configuration XML is %s" % ET.tostring(iq['pubsub']['configure'].xml))
+		logging.debug("The configuration is: %s" % iq['pubsub']['configure']['config'].getValues())
 		if node in self.nodes:
 			raise XMPPError('conflict', etype='cancel')
-		if not self.createNode(node, config. iq['from']):
+		if not self.createNode(node, config, iq['from'].full):
 			raise XMPPError()
 		iq.reply()
-		iq['pubsub'].clear()
 		iq['pubsub']['create']['node'] = node
 		iq.send()
 	
