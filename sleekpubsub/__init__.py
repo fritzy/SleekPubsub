@@ -138,9 +138,9 @@ class PublishSubscribe(object):
 			stanza.reply().send()
 		else:
 			stanza.reply()
+			stanza['pubsub_owner']['delete']['node'] = 'somenode'
 			stanza['type'] = 'error'
 			stanza.send()
-		
 	
 	def modifyAffiliations(self, node, updates={}, who=None):
 		if node in self.nodes:
@@ -160,13 +160,15 @@ class PublishSubscribe(object):
 		ids = []
 		if node is None:
 			raise XMPPError('item-not-found')
-		for item in stanza['pubsub']['publish']['items']:
+		for item in stanza['pubsub']['publish']:
 			item_id = self.publish(stanza['pubsub']['publish']['node'], item['payload'], item['id'], stanza['from'].bare)
 			ids.append(item_id)
 		stanza.reply()
 		#stanza['pubsub'].clear()
 		for id in ids:
-			stanza['pubsub']['publish']['items'].append(Pubsub.Item({'id': id}))
+			item = Pubsub.Item()
+			item['id'] = id
+			stanza['pubsub']['publish'].append(item)
 		stanza.send()
 	
 	def publish(self, node, item, id=None, who=None):

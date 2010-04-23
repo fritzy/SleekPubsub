@@ -166,6 +166,20 @@ class PubsubDB(object):
 		c.execute('insert into subscription (node_id, jid, config, subid, jidto) values (?,?,?,?,?)', (id, jid, config, subid, to))
 		self.conn.commit()
 		c.close()
+
+	def deleteSubscription(self, node, jid, subid=None):
+		self.win.put((None, self._delSubscription, (node, jid, subid)))
+
+	def _delSubscription(self, node, jid, subid):
+		c = self.conn.cursor()
+		c.execute('select id from node where name=?', (node,))
+		id = c.fetchone()[0]
+		if subid is not None:
+			c.execute("delete from subscription where jid=? and node_id=? and subid=?", (jid, id, subid))
+		else:
+			c.execute("delete from subscription where jid=? and node_id=?", (jid, id))
+		self.conn.commit()
+		c.close()
 	
 	def updateNodeConfig(self, node, config):
 		self.synch(node, config=config)

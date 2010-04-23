@@ -160,11 +160,11 @@ class BaseNode(object):
 
 	def unsubscribe(self, jid, who=None, subid=None):
 		if subid is None:
-			subid = self.subscriptionsbyjid[jid].getsubid()
+			subid = self.subscriptionsbyjid[jid].getid()
 		self.db.deleteSubscription(self.name, jid, subid)
 		try:
 			del self.subscriptions[subid]
-			if self.subscriptionsbyjid[jid].getsubid() == subid:
+			if self.subscriptionsbyjid[jid].getid() == subid:
 				del self.subscriptionsbyjid[jid]
 		except IndexError():
 			return False
