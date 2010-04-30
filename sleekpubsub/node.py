@@ -34,8 +34,8 @@ class Subscription(object):
 		return config
 
 class Event(object):
-	def __init__(self, node):
-		self.nodes = [node]
+	def __init__(self):
+		self.nodes = []
 		self.jids = []
 	
 	def addJid(self, jid):
@@ -54,8 +54,8 @@ class Event(object):
 		self.jids = []
 
 class ItemEvent(Event):
-	def __init__(self, node, item):
-		Event.__init__(self, node)
+	def __init__(self, item):
+		Event.__init__(self)
 		self.item = item
 	
 	def getItem(self):
@@ -97,6 +97,7 @@ class BaseNode(object):
 		self.xmpp = self.pubsub.xmpp
 		self.db = db
 		self.name = name
+		self.collections = []
 		self.config = config
 		self.subscription_form = {}
 		self.publish_form = {}
@@ -119,6 +120,8 @@ class BaseNode(object):
 			self.affiliations = self.db.getAffiliations(self.name)
 			self.items = self.db.getItems(self.name)
 			self.config = pickle.loads(self.db.getNodeConfig(self.name))
+			parentset = self._checkconfigcollections(self.config, False)
+			if not parentset: logging.warning("Was not able to set all parents in %s" % self.name)
 			subs = self.db.getSubscriptions(self.name)
 			for jid, subid, config in subs:
 				self.subscriptions[subid] = Subscription(self, jid, subid, config)
@@ -210,7 +213,7 @@ class BaseNode(object):
 			self.items[item_id] = item_inst
 			if item_id not in self.itemorder:
 				self.itemorder.append(item_id)
-		event = ItemEvent(self, item_inst)
+		event = ItemEvent(item_inst)
 		self.notifyItem(event)
 		max_items = int(self.config.get('pubsub#max_items', 0))
 		if max_items != 0 and len(self.itemorder) > max_items:
@@ -224,6 +227,18 @@ class BaseNode(object):
 			self.itemorder.pop(self.itemorder.index(id))
 			self.notifyDelete(ItemEvent(self, item))
 	
+	def _checkconfigcollections(self, config, reconfigure=True):
+		collections = []
+		passed = True
+		for node in config.get('pubsub#collection', []):
+			if node not in self.pubsub.nodes:
+				passed = False
+			else:
+				collections.append(node)
+		if not reconfigure or passed:
+			self.collections = collections
+		return passed
+	
 	def create(self, config=None):
 		pass
 	
@@ -231,6 +246,8 @@ class BaseNode(object):
 		return self.config
 
 	def configure(self, config):
+		if not self._checkconfigcollections(config):
+			raise XMPPError() #TODO make this the right error
 		self.config.update(config)
 		self.db.synch(self.name, config=pickle.dumps(self.config))
 	
@@ -262,6 +279,9 @@ class BaseNode(object):
 		return self.affiliations
 	
 	def notifyItem(self, event):
+		if event.hasNode(self.name):
+			return False
+		event.addNode(self.name)
 		item_id = event.item.name
 		payload = event.item.payload
 		jid=''
@@ -284,9 +304,19 @@ class BaseNode(object):
 				print("Message is from", mto)
 				msg['from'] = mto or self.xmpp.jid
 				self.xmpp.send(msg)
+		for parent in self.collections:
+			parent.notifyItem(event)
 	
 	def notifyConfig(self):
 		pass
 	
 	def notifyDelete(self, event):
 		pass
+
+class CollectionNode(BaseNode):
+
+	def publish(self, *args, **kwargs):
+		return False
+
+	def deleteItem(self, *args, **kwargs):
+		return False

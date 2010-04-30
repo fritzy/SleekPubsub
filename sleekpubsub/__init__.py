@@ -7,7 +7,7 @@ from sleekxmpp.exceptions import XMPPError
 from xml.etree import cElementTree as ET
 import uuid
 from . db import PubsubDB
-from . node import BaseNode
+from . node import BaseNode, CollectionNode
 import logging
 from . adhoc import PubsubAdhoc
 from . httpd import HTTPD
@@ -24,7 +24,7 @@ class PublishSubscribe(object):
 		self.nodeset = set()
 		
 		self.admins = []
-		self.node_classes = {'leaf': BaseNode}
+		self.node_classes = {'leaf': BaseNode, 'collection': CollectionNode}
 		self.nodes = {}
 		self.adhoc = PubsubAdhoc(self)
 		self.http = HTTPD(self)
@@ -96,6 +96,7 @@ class PublishSubscribe(object):
 		default_config.addField('pubsub#persist_items', 'boolean', label='Persist items in storage', value=False)
 		default_config.addField('pubsub#max_items', label='Max # of items to persist', value='10')
 		default_config.addField('pubsub#subscribe', 'boolean', label='Whether to allow subscriptions', value=True)
+		default_config.addField('pubsub#collection', 'text-multi', label="This node in collections")
 		model = default_config.addField('pubsub#access_model', 'list-single', label='Specify the subscriber model', value='open')
 		#model.addOption('authorize', 'Authorize') # not yet implemented
 		model.addOption('open', 'Open')
