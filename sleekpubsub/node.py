@@ -34,9 +34,10 @@ class Subscription(object):
 		return config
 
 class Event(object):
-	def __init__(self):
+	def __init__(self, node):
 		self.nodes = []
 		self.jids = []
+		self.originalnode = node
 	
 	def addJid(self, jid):
 		self.jids.append(jid)
@@ -54,8 +55,8 @@ class Event(object):
 		self.jids = []
 
 class ItemEvent(Event):
-	def __init__(self, item):
-		Event.__init__(self)
+	def __init__(self, name, item):
+		Event.__init__(self, name)
 		self.item = item
 	
 	def getItem(self):
@@ -213,7 +214,7 @@ class BaseNode(object):
 			self.items[item_id] = item_inst
 			if item_id not in self.itemorder:
 				self.itemorder.append(item_id)
-		event = ItemEvent(item_inst)
+		event = ItemEvent(self.name, item_inst)
 		self.notifyItem(event)
 		max_items = int(self.config.get('pubsub#max_items', 0))
 		if max_items != 0 and len(self.itemorder) > max_items:
@@ -225,12 +226,15 @@ class BaseNode(object):
 			item = self.items[id]
 			del self.items[id]
 			self.itemorder.pop(self.itemorder.index(id))
-			self.notifyDelete(ItemEvent(self, item))
+			self.notifyDelete(ItemEvent(self, self.name, item))
 	
 	def _checkconfigcollections(self, config, reconfigure=True):
 		collections = []
 		passed = True
-		for node in config.get('pubsub#collection', []):
+		nodes = config.get('pubsub#collection', [])
+		if type(nodes) != type([]):
+			nodes = [nodes]
+		for node in nodes:
 			if node not in self.pubsub.nodes:
 				passed = False
 			else:
@@ -287,7 +291,7 @@ class BaseNode(object):
 		jid=''
 		msg = self.xmpp.makeMessage(mto=jid, mfrom=self.xmpp.jid)
 		xevent = ET.Element('{http://jabber.org/protocol/pubsub#event}event')
-		items = ET.Element('items', {'node': self.name})
+		items = ET.Element('items', {'node': event.originalnode})
 		item = ET.Element('item', {'id': item_id})
 		item.append(payload)
 		items.append(item)
@@ -305,7 +309,8 @@ class BaseNode(object):
 				msg['from'] = mto or self.xmpp.jid
 				self.xmpp.send(msg)
 		for parent in self.collections:
-			parent.notifyItem(event)
+			if parent in self.pubsub.nodes:
+				self.pubsub.nodes[parent].notifyItem(event)
 	
 	def notifyConfig(self):
 		pass
