@@ -12,6 +12,72 @@ import logging
 from . adhoc import PubsubAdhoc
 from . httpd import HTTPD
 
+class NodeCache(object):
+	"""Manages nodes in memory, keeping most recently accessed in memory"""
+	def __init__(self, pubsub, limit=100, clearbatch=10):
+		self.clearbatch = clearbatch
+		self.pubsub = pubsub
+		self.activenodes = {}
+		self.cache = []
+		self.limit = limit
+		self.allnodes = {}
+	
+	def __getitem__(self, key):
+		if key not in self.allnodes:
+			raise KeyError
+		if key not in self.activenodes:
+			self.loadNode(key)
+		self.cache.append(self.cache.pop(self.cache.index(key))) # put node at the end of the cache
+		return self.activenodes[key]
+
+	def __contains__(self, key):
+		return key in self.allnodes
+
+	def get(self, key, default=None):
+		if key in self:
+			return self.__getitem__(key)
+		else:
+			return default
+
+	def loadNode(self, name):
+		if name in self.activenodes:
+			return True
+		if name not in self.allnodes:
+			raise KeyError
+		self.activenodes[name] = self.pubsub.node_classes.get(self.allnodes[name], BaseNode)(self.pubsub, self.pubsub.db, name)
+		self.cache.append(name)
+		self.clearExtra()
+	
+	def addNode(self, name, klass, node=None):
+		self.allnodes[name] = klass
+		if isinstance(node, BaseNode):
+			self.cache.append(name)
+			self.activenodes[name] = node
+			self.clearExtra()
+	
+	def deleteNode(self, name):
+			if name in self.cache:
+				print("deleting node %s" % name)
+				del self.activenodes[name]
+				self.cache.pop(self.cache.index(name))
+			if name in self.allnodes:
+				del self.allnodes[name]
+	
+	def clearExtra(self):
+		while len(self.cache) > self.limit:
+			for node in self.cache[:self.clearbatch]:
+				self.clear(node)
+	
+	def clearAll(self):
+		for node in self.cache:
+			self.clear(node)
+	
+	def clear(self, node):
+		self.activenodes[node].save()
+		del self.activenodes[node]
+		self.cache.pop(self.cache.index(node))
+	
+
 class PublishSubscribe(object):
 	
 	def __init__(self, xmpp, dbfile, config):
@@ -21,11 +87,10 @@ class PublishSubscribe(object):
 		
 		self.config = config
 		self.default_config = self.getDefaultConfig()
-		self.nodeset = set()
 		
 		self.admins = []
 		self.node_classes = {'leaf': BaseNode, 'collection': CollectionNode}
-		self.nodes = {}
+		self.nodes = NodeCache(self)
 		self.adhoc = PubsubAdhoc(self)
 		self.http = HTTPD(self)
 
@@ -97,6 +162,7 @@ class PublishSubscribe(object):
 		default_config.addField('pubsub#max_items', label='Max # of items to persist', value='10')
 		default_config.addField('pubsub#subscribe', 'boolean', label='Whether to allow subscriptions', value=True)
 		default_config.addField('pubsub#collection', 'text-multi', label="This node in collections")
+		default_config.addField('sleek#saveonchange', 'boolean', label='Save on every change', value=False)
 		model = default_config.addField('pubsub#access_model', 'list-single', label='Specify the subscriber model', value='open')
 		#model.addOption('authorize', 'Authorize') # not yet implemented
 		model.addOption('open', 'Open')
@@ -114,8 +180,8 @@ class PublishSubscribe(object):
 	
 	def loadNodes(self):
 		for node, node_type in self.db.getNodes():
-			self.nodes[node] = self.node_classes.get(node_type, BaseNode)(self, self.db, node)
-			self.nodeset.update((node,))
+			self.nodes.addNode(node, node_type)
+#[node] = self.node_classes.get(node_type, BaseNode)(self, self.db, node)
 
 	def registerNodeType(self, nodemodule):
 		self.nodeplugins.append(nodemodule.extension_class(self))
@@ -126,9 +192,8 @@ class PublishSubscribe(object):
 	
 	def deleteNode(self, node):
 		if node in self.nodes:
-			del self.nodes[node]
-			self.nodeset.discard(node)
-			
+			self.nodes[node].delete()
+			self.nodes.deleteNode(node)
 			self.db.deleteNode(node)
 			return True
 		else:
@@ -189,12 +254,11 @@ class PublishSubscribe(object):
 			config = self.default_config.merge(config)
 		config = config.getValues()
 		nodeclass = self.node_classes.get(config['pubsub#node_type'])
-		if node in self.nodeset or nodeclass is None:
+		if node in self.nodes or nodeclass is None:
 			return False
 		if who:
 			who = self.xmpp.getjidbare(who)
-		self.nodes[node] = nodeclass(self, self.db, node, config, owner=who, fresh=True)
-		self.nodeset.update((node,))
+		self.nodes.addNode(node, nodeclass, nodeclass(self, self.db, node, config, owner=who, fresh=True))
 		return True
 	
 	def handleCreateNode(self, iq):
@@ -211,7 +275,7 @@ class PublishSubscribe(object):
 		iq.send()
 	
 	def configureNode(self, node, config):
-		if node not in self.nodeset:
+		if node not in self.nodes:
 			return False
 		config = self.default_config.merge(config).getValues()
 		self.nodes[node].configure(config)
@@ -231,7 +295,7 @@ class PublishSubscribe(object):
 		self.xmpp.send(iq)
 	
 	def subscribeNode(self, node, jid, who=None, to=None):
-		if node not in self.nodeset:
+		if node not in self.nodes:
 			return False
 		return self.nodes[node].subscribe(jid, who, to=to)
 	
@@ -256,7 +320,7 @@ class PublishSubscribe(object):
 		node = subscribe.get('node')
 		jid = subscribe.get('jid')
 		subid = subscribe.get('subid')
-		if node not in self.nodeset:
+		if node not in self.nodes:
 			self.xmpp.send(self.xmpp.makeIqError(xml.get('id')))
 			return
 		self.nodes[node].unsubscribe(jid, xml.get('from'), subid)
@@ -273,12 +337,12 @@ class PublishSubscribe(object):
 			return False
 	
 	def getNodeConfig(self, node):
-		if node not in self.nodeset:
+		if node not in self.nodes:
 			return False
 		config = self.default_config.copy()
 		config.setValues(self.nodes[node].getConfig())
 		return config
-	
+
 	def handleGetNodeConfig(self, stanza):
 		xml = stanza.xml
 		configure = xml.find('{http://jabber.org/protocol/pubsub#owner}pubsub/{http://jabber.org/protocol/pubsub#owner}configure')

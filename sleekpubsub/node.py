@@ -32,7 +32,7 @@ class Subscription(object):
 
 	def config(self):
 		return config
-
+	
 class Event(object):
 	def __init__(self, node):
 		self.nodes = []
@@ -115,6 +115,7 @@ class BaseNode(object):
 		if self.new_owner is not None:
 			self.affiliations['owner'].append(self.new_owner)
 		self.dbLoad()
+		self.lastsaved = time.time()
 	
 	def dbLoad(self):
 		if not self.fresh:
@@ -132,7 +133,11 @@ class BaseNode(object):
 
 	def dbDump(self):
 		self.db.synch(self.name, pickle.dumps(self.config), self.affiliations, self.items)
-	
+		self.lastsaved = time.time()
+
+	def save(self):
+		self.dbDump()
+
 	def discoverItems(self):
 		pass
 	
@@ -143,7 +148,7 @@ class BaseNode(object):
 		return self.affiliations
 	
 	def subscribe(self, jid, who=None, config=None, to=None):
-		print(who, self.affiliations['owner'])
+		#print(who, self.affiliations['owner'])
 		if (
 			(who is None or who in self.affiliations['owner'] or who.startswith(jid)) and 
 			(self.config['pubsub#access_model'] == 'open' or 
@@ -156,7 +161,8 @@ class BaseNode(object):
 				config = ET.tostring(config.getXML('submit'))
 			self.subscriptions[subid] = Subscription(self, jid, subid, config, to)
 			self.subscriptionsbyjid[jid] = self.subscriptions[subid]
-			self.db.addSubscription(self.name, jid, subid, config, to)
+			if self.config['sleek#saveonchange']:
+				self.db.addSubscription(self.name, jid, subid, config, to)
 			return subid
 		else:
 			return False
@@ -165,7 +171,8 @@ class BaseNode(object):
 	def unsubscribe(self, jid, who=None, subid=None):
 		if subid is None:
 			subid = self.subscriptionsbyjid[jid].getid()
-		self.db.deleteSubscription(self.name, jid, subid)
+		if self.config['sleek#saveonchange']:
+			self.db.deleteSubscription(self.name, jid, subid)
 		try:
 			del self.subscriptions[subid]
 			if self.subscriptionsbyjid[jid].getid() == subid:
@@ -210,7 +217,8 @@ class BaseNode(object):
 			payload = item
 		item_inst = self.item_class(self, item_id, who, payload, options)
 		if self.config.get('pubsub#persist_items', False):
-			self.db.setItem(self.name, item_id, payload)
+			if self.config['sleek#saveonchange']:
+				self.db.setItem(self.name, item_id, payload)
 			self.items[item_id] = item_inst
 			if item_id not in self.itemorder:
 				self.itemorder.append(item_id)
@@ -253,6 +261,7 @@ class BaseNode(object):
 		if not self._checkconfigcollections(config):
 			raise XMPPError() #TODO make this the right error
 		self.config.update(config)
+		# we do this regardless of cache settings
 		self.db.synch(self.name, config=pickle.dumps(self.config))
 	
 	def delete(self):
@@ -274,7 +283,8 @@ class BaseNode(object):
 			if key not in self.affiliationtypes:
 				return False
 		self.affiliations.update(affiliations)
-		self.db.synch(self.name, affiliations=self.affiliations)
+		if self.config['sleek#saveonchange']:
+			self.db.synch(self.name, affiliations=self.affiliations)
 		return True
 	
 	def getAffiliations(self, who=None):
@@ -305,7 +315,7 @@ class BaseNode(object):
 			if not event.hasJid(jid):
 				event.addJid(jid)
 				msg.attrib['to'] = jid
-				print("Message is from", mto)
+				#print("Message is from", mto)
 				msg['from'] = mto or self.xmpp.jid
 				self.xmpp.send(msg)
 		for parent in self.collections:
@@ -317,6 +327,20 @@ class BaseNode(object):
 	
 	def notifyDelete(self, event):
 		pass
+
+	def delete(self):
+		for sub in self.subscriptions.keys():
+			del self.subscriptions[sub]
+		for sub in self.subscriptionsbyjid.keys():
+			del self.subscriptionsbyjid[sub]
+		for item in self.items.keys():
+			del self.items[item]
+		for collection in self.collections:
+			self.collections.pop(self.collections.index(collection))
+	
+	def __del__(self):
+		print("%s is being destroyed" % self.name)
+	
 
 class CollectionNode(BaseNode):
 
