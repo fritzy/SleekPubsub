@@ -244,7 +244,7 @@ class PublishSubscribe(object):
 	
 	def handleGetDefaultConfig(self, stanza):
 		stanza.reply()
-		stanza['pubsub_owner']['default']['config'] = self.default_config
+		stanza['pubsub_owner']['default']['config'] = self.node_classes.get(stanza['pubsub_owner']['default']['type'], BaseNode).default_config
 		stanza.send()
 	
 	def createNode(self, node, config=None, who=None):

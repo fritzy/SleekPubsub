@@ -1,6 +1,7 @@
 import sleekxmpp.componentxmpp
 from sleekxmpp.xmlstream.matcher.xmlmask import MatchXMLMask
 from sleekxmpp.xmlstream.handler.callback import Callback
+from sleekxmpp.plugins.xep_0004 import Form
 from xml.etree import cElementTree as ET
 import uuid
 import logging
@@ -91,6 +92,38 @@ class BaseNode(object):
 	nodetype = 'leaf'
 	affiliationtypes = ('owner', 'publisher', 'member', 'outcast', 'pending')
 
+	default_config = Form(None, title='Leaf Config Form')
+	default_config.addField('FORM_TYPE', 'hidden', value='http://jabber.org/protocol/pubsub#node_config')
+	ntype = default_config.addField('pubsub#node_type', 'list-single', label='Select the node type', value='leaf')
+	ntype.addOption('leaf', 'Leaf')
+	default_config.addField('pubsub#title', label='A friendly name for the node')
+	default_config.addField('pubsub#deliver_notifications', 'boolean', label='Deliver event notifications', value=True)
+	default_config.addField('pubsub#deliver_payloads', 'boolean', label='Deliver payloads with event notifications', value=True)
+	default_config.addField('pubsub#notify_config', 'boolean', label='Notify subscribers when the node configuration changes', value=False)
+	default_config.addField('pubsub#notify_delete', 'boolean', label='Notify subscribers when the node is deleted', value=False)
+	default_config.addField('pubsub#notify_retract', 'boolean', label='Notify subscribers when items are removed from the node', value=False)
+	default_config.addField('pubsub#notify_sub', 'boolean', label='Notify owners about new subscribers and unsubscribes', value=False)
+	default_config.addField('pubsub#persist_items', 'boolean', label='Persist items in storage', value=False)
+	default_config.addField('pubsub#max_items', label='Max # of items to persist', value='10')
+	default_config.addField('pubsub#subscribe', 'boolean', label='Whether to allow subscriptions', value=True)
+	default_config.addField('pubsub#collection', 'text-multi', label="This node in collections")
+	default_config.addField('sleek#saveonchange', 'boolean', label='Save on every change', value=False)
+	model = default_config.addField('pubsub#access_model', 'list-single', label='Specify the subscriber model', value='open')
+	#model.addOption('authorize', 'Authorize') # not yet implemented
+	model.addOption('open', 'Open')
+	model.addOption('whitelist', 'whitelist')
+	model = default_config.addField('pubsub#publish_model', 'list-single', label='Specify the publisher model', value='publishers')
+	model.addOption('publishers', 'Publishers')
+	model.addOption('subscribers', 'Subscribers')
+	model.addOption('open', 'Open')
+	model = default_config.addField('pubsub#send_last_published_item', 'list-single', label='Send last published item', value='never')
+	model.addOption('never', 'Never')
+	model.addOption('on_sub', 'On Subscription')
+	model.addOption('on_sun_and_presence', 'On Subscription And Presence')
+	default_config.addField('pubsub#presence_based_delivery', 'boolean', label='Deliver notification only to available users', value=False)
+	del ntype
+	del model
+
 	def __init__(self, pubsub, db, name, config=None, owner=None, fresh=False):
 		self.new_owner = owner
 		self.fresh = fresh
@@ -99,7 +132,7 @@ class BaseNode(object):
 		self.db = db
 		self.name = name
 		self.collections = []
-		self.config = config
+		self.config = config or self.default_config.copy()
 		self.subscription_form = {}
 		self.publish_form = {}
 		self.items = {}
@@ -222,6 +255,8 @@ class BaseNode(object):
 			self.items[item_id] = item_inst
 			if item_id not in self.itemorder:
 				self.itemorder.append(item_id)
+			else:
+				self.itemorder.append(self.itemorder.pop(self.itemorder.index(item_id)))
 		event = ItemEvent(self.name, item_inst)
 		self.notifyItem(event)
 		max_items = int(self.config.get('pubsub#max_items', 0))
@@ -349,3 +384,14 @@ class CollectionNode(BaseNode):
 
 	def deleteItem(self, *args, **kwargs):
 		return False
+
+class QueueNode(BaseNode):
+	default_config = BaseNode.default_config.copy()
+	bcast = default_config.addField("queue#braodcast", "list-single", label="Broadcast behavior", value="broadcast")
+	bcast.addOption('broadcast', 'Broadcast')
+	bcast.addOption('roundrobin', "Round Robin")
+	bcast.addOption('hybrid', 'Hybrid')
+	del bcast
+	default_config.addField('queue#bcasthybridamount', label='Number of subscribers to bcast to in round robin', value='4')
+
+	
