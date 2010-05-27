@@ -8,6 +8,35 @@ import logging
 import pickle
 import time
 
+class StateMachine(object):
+    def __init__(self, resource, ns):
+        self.ns = ns
+        self.resource = resource
+        self.registers = {}
+        self.statexml = None
+
+    def registerStateCallback(self, current, new, callback):
+        self.registers[(current, new)] = callback
+
+    def setState(self, xml):
+        current = None
+        if self.statexml is not None:
+            current = self.statexml.tag
+        if (current, xml.tag) not in self.registers:
+            return False
+        passed = self.registers[(current, xml.tag)]
+        if passed:
+            self.statexml = xml
+            self.resource.saveState(xml)
+
+    def getState(self):
+        if self.statexml is None:
+            return None
+        return self.statexml.tag
+    
+    def getXML(self):
+        return self.statexml
+
 class Subscription(object):
 	def __init__(self, node, jid=None, subid=None, config=None, to=None):
 		self.node = node
@@ -63,6 +92,27 @@ class ItemEvent(Event):
 	def getItem(self):
 		return item
 
+class QueueItemEvent(ItemEvent):
+    def __init__(self, name, item, bcast=None, rotation=0):
+        ItemEvent__init__(self, name, item)
+        self.bcast = bcast
+        self.rotation = rotation
+        self.idx = 0
+		subgen = None
+	
+	def reset(self):
+		self.idx = 0
+	
+	def setSubGen(self, subgen):
+		self.subgen = subgen
+	
+	def next(self):
+		if self.subgen is not None:
+			return self.subgen.next()
+		else:
+			return []
+		
+
 class DeleteEvent(ItemEvent):
 	pass
 
@@ -77,6 +127,7 @@ class Item(object):
 		self.payload = payload
 		self.config = config
 		self.time = time.time()
+        self.state = None
 	
 	def getpayload(self):
 		return self.payload
@@ -87,6 +138,13 @@ class Item(object):
 	def getwho(self):
 		return self.who
 
+    def saveState(self, xml):
+        self.node._saveItemState(self.name, xml)
+
+class QueueItem(Item):
+    def __init__(self, *args, **kwargs):
+        super(QueueItem, self).__init__()
+        self.state['http://andyet.net/protocol/pubsubqueue'] = StateMachine(self)
 
 class BaseNode(object):
 	nodetype = 'leaf'
@@ -124,6 +182,9 @@ class BaseNode(object):
 	del ntype
 	del model
 
+    item_class = Item
+    itemevent_class = ItemEvent
+
 	def __init__(self, pubsub, db, name, config=None, owner=None, fresh=False):
 		self.new_owner = owner
 		self.fresh = fresh
@@ -138,7 +199,7 @@ class BaseNode(object):
 		self.items = {}
 		self.itemorder = []
 		self.synch = True
-		self.item_class = Item
+        self.state = ''
 		#self.affiliations = {'owner': [], 'publisher': [], 'member': [], 'outcast': [], 'pending': []}
 		self.affiliations = {}
 		for afftype in self.affiliationtypes:
@@ -228,18 +289,31 @@ class BaseNode(object):
 	def getLastItem(self, node):
 		pass
 	
-	def eachSubscriber(self):
+	def eachSubscriber(self, step=1):
 		"Generator for subscribers."
-		for subid in self.subscriptions:
+		if step < 1:
+			raise ValueError
+		subscriptions = self.subscriptions.keys()
+		result = []
+		idx = 0 # would enumerate, but num of results isn't necessary the same as len(subscriptions)
+		for subid in subscriptions:
 			subscriber = self.subscriptions[subid]
 			jid = subscriber.getjid()
 			to = subscriber.getto()
 			logging.debug("%s: %s %s" % (jid, '/' in jid, self.config.get('pubsub#presence_based_delivery', False)))
 			if '/' in jid or not self.config.get('pubsub#presence_based_delivery', False):
-					yield jid, to
+					result.append((jid, to))
+					if idx % step == 0:
+						yield result
+						result = []
+					idx += 1
 			else:
 				for resource in self.xmpp.roster.get(jid, {'presence': []})['presence']:
-					yield "%s/%s" % (jid, resource), to
+					result.append(("%s/%s" % (jid, resource), to))
+					if idx % step == 0:
+						yield result
+						result = []
+					idx += 1
 	
 	def publish(self, item, item_id=None, options=None, who=None):
 		if item_id is None:
@@ -257,7 +331,7 @@ class BaseNode(object):
 				self.itemorder.append(item_id)
 			else:
 				self.itemorder.append(self.itemorder.pop(self.itemorder.index(item_id)))
-		event = ItemEvent(self.name, item_inst)
+		event = self.itemevent_class(self.name, item_inst)
 		self.notifyItem(event)
 		max_items = int(self.config.get('pubsub#max_items', 0))
 		if max_items != 0 and len(self.itemorder) > max_items:
@@ -298,8 +372,20 @@ class BaseNode(object):
 		self.config.update(config)
 		# we do this regardless of cache settings
 		self.db.synch(self.name, config=pickle.dumps(self.config))
+    
+    def setState(self, state):
+        pass
+
+    def setItemState(self, item_id, state):
+        pass
 	
-	def delete(self):
+    def _saveState(self, xml):
+        pass
+
+    def _saveItemState(self, node, xml):
+        pass
+
+	def deleteItem(self, item_id):
 		pass
 	
 	def purgeNodeItems(self):
@@ -346,7 +432,8 @@ class BaseNode(object):
 			msg['type'] = 'chat'
 		else:
 			msg.append(xevent)
-		for jid, mto in self.eachSubscriber(): 
+		for toset in self.eachSubscriber(): 
+			jid, mto = toset[0]
 			if not event.hasJid(jid):
 				event.addJid(jid)
 				msg.attrib['to'] = jid
@@ -372,10 +459,6 @@ class BaseNode(object):
 			del self.items[item]
 		for collection in self.collections:
 			self.collections.pop(self.collections.index(collection))
-	
-	def __del__(self):
-		print("%s is being destroyed" % self.name)
-	
 
 class CollectionNode(BaseNode):
 
@@ -392,6 +475,61 @@ class QueueNode(BaseNode):
 	bcast.addOption('roundrobin', "Round Robin")
 	bcast.addOption('hybrid', 'Hybrid')
 	del bcast
-	default_config.addField('queue#bcasthybridamount', label='Number of subscribers to bcast to in round robin', value='4')
+	default_config.addField('queue#bcaststep', label='Number of subscribers to step to in round robin', value='4')
+	default_config.addField('queue#wait', label='Seconds to wait for subscribers to claim', value='4')
+    item_class = QueueItem
+    itemevent_class = QueueItemEvent
 
+    def __init__(self, *args, **kwargs):
+        BaseNode.__init__(self, *args, **kwargs)
+        self.current_event = None
+
+    def setState(self, state):
+        super(QueueNode, self).setState(state)
+
+    def setItemState(self, item_id, state):
+        super(QueueNode, self).setState(state)
 	
+    def notifyItem(self, event):
+		if event.hasNode(self.name) or self.current_event is None:
+            return
+		event.addNode(self.name)
+		subgen = self.eachSubscriber(step=int(self.config.get('queue#bcaststep', 1)))
+        event.setSubGen(subgen)
+        self._broadcast()
+		for parent in self.collections:
+			if parent in self.pubsub.nodes:
+				self.pubsub.nodes[parent].notifyItem(event)
+        
+    def _broadcast(self):
+        if self.current_event is None:
+            return
+        event = self.current_event
+		item_id = event.item.name
+		payload = event.item.payload
+		jid=''
+		msg = self.xmpp.makeMessage(mto=jid, mfrom=self.xmpp.jid)
+		xevent = ET.Element('{http://jabber.org/protocol/pubsub#event}event')
+		items = ET.Element('items', {'node': event.originalnode})
+		item = ET.Element('item', {'id': item_id})
+		item.append(payload)
+		items.append(item)
+		xevent.append(items)
+		if payload.tag == '{jabber:client}body':
+			msg['body'] = payload.text
+			msg['type'] = 'chat'
+		else:
+			msg.append(xevent)
+        try:
+            for jid, mto in event.next():
+                if not event.hasJid(jid):
+                    event.addJid(jid)
+                    msg.attrib['to'] = jid
+                    #print("Message is from", mto)
+                    msg['from'] = mto or self.xmpp.jid
+                    self.xmpp.send(msg)
+            self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), float(self.config.get('queue#wait', 3)), self._broadcast, tuple())
+        except StopIteration:
+            #start broadcasting again
+            self.current_event = None
+            self.notifyItem(event)
