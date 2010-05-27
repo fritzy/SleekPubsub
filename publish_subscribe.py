@@ -2,7 +2,7 @@ import os
 import sys
 import sleekxmpp.componentxmpp
 import logging
-import logging.handlers
+#import logging.handlers
 import sleekpubsub
 import sleekpubsub.jobnode
 
@@ -12,6 +12,8 @@ except ImportError:
 	import ConfigParser as configparser
 
 from optparse import OptionParser
+
+logging.addLevelName(5, "VERBOSE")
 #import sleekxmpp.xmlstream.xmlstream
 
 #sleekxmpp.xmlstream.xmlstream.HANDLER_THREADS = 5
@@ -79,6 +81,7 @@ def createDaemon():
 if __name__ == '__main__':
 	#parse command line arguements
 
+
 	optp = OptionParser()
 	optp.add_option('--daemon', action="store_true", dest='daemonize', help="run as daemon")
 	optp.add_option('-q','--quiet', help='set logging to ERROR', action='store_const', dest='loglevel', const=logging.ERROR, default=None)
@@ -94,6 +97,7 @@ if __name__ == '__main__':
 	config.read(opts.configfile)
 	
 	loglevel = opts.loglevel or getattr(logging, config.get('settings', 'loglevel'))
+	#print loglevel
 	logfile = config.get('settings', 'logfile')
 
 	if opts.daemonize:
@@ -103,8 +107,10 @@ if __name__ == '__main__':
 		handler = logging.handlers.RotatingFileHandler(logfile)
 		handler.setFormatter(formatter)
 		rootlogger.addHandler(handler)
+		logging.info("Daemonized")
 	else:
-		logging.basicConfig(level=opts.loglevel, format='%(levelname)-8s %(message)s')
+		logging.basicConfig(level=loglevel, format='%(levelname)-8s %(message)s')
+		logging.info("Not daemonized")
 
 	f = open(config.get('pubsub', 'pid'), 'w')
 	f.write("%s" % os.getpid())
@@ -121,6 +127,8 @@ if __name__ == '__main__':
 
 	if xmpp.connect():
 		xmpp.process(threaded=False)
-		sys.exit(retCode)
+		xmpp.disconnect()
+		print("ok?")
+		sys.exit(0)
 	else:
 		logging.log(logging.CRITICAL, "Unable to connect.")

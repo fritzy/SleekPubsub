@@ -136,22 +136,24 @@ class PubsubDB(object):
 	def _synch(self, node, config=None, affiliations={}, items={}, subscriptions=[]):
 		c = self.conn.cursor()
 		c.execute('select id from node where name=?', (node,))
-		id = c.fetchone()[0]
-		updates = []
-		for aftype in affiliations:
-			for jid in affiliations[aftype]:
-				c.execute('replace into affiliation (node_id, jid, type) values (?,?,?)', (id, jid, aftype))
-		if config is not None:
-			c.execute('update node set config=? where name=?', (config, node))
-		updates = [(id, item_name, items[item_name].getpayload(), items[item_name].gettime(), items[item_name].getwho()) for item_name in items]
-		for update in updates:
-			pass
-			#print(update)
-			#c.execute('replace into item (node_id, name, payload, time, who) values (?,?,?,?,?)', update)
-		updates = [(id, sub.getjid(), sub.getconfig(), sub.getid()) for sub in subscriptions]
-		for update in updates:
-			c.execute('replace into subscription (node_id, jid, config, subid) values (?,?,?,?)', update)
-		self.conn.commit()
+		id = c.fetchone()
+		if id is not None:
+			id = id[0]
+			updates = []
+			for aftype in affiliations:
+				for jid in affiliations[aftype]:
+					c.execute('replace into affiliation (node_id, jid, type) values (?,?,?)', (id, jid, aftype))
+			if config is not None:
+				c.execute('update node set config=? where name=?', (config, node))
+			updates = [(id, item_name, items[item_name].getpayload(), items[item_name].gettime(), items[item_name].getwho()) for item_name in items]
+			for update in updates:
+				pass
+				#print(update)
+				#c.execute('replace into item (node_id, name, payload, time, who) values (?,?,?,?,?)', update)
+			updates = [(id, sub.getjid(), sub.getconfig(), sub.getid()) for sub in subscriptions]
+			for update in updates:
+				c.execute('replace into subscription (node_id, jid, config, subid) values (?,?,?,?)', update)
+			self.conn.commit()
 		c.close()
 	
 	def addSubscription(self, node, jid, subid, config=None, to=None):

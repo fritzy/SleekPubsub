@@ -4,6 +4,7 @@ from . node import ItemEvent
 from sleekxmpp.xmlstream.matcher.xmlmask import MatchXMLMask
 from sleekxmpp.xmlstream.handler.callback import Callback
 from xml.etree import cElementTree as ET
+import logging
 
 
 class JobItem(Item):

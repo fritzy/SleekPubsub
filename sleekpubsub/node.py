@@ -9,33 +9,43 @@ import pickle
 import time
 
 class StateMachine(object):
-    def __init__(self, resource, ns):
-        self.ns = ns
-        self.resource = resource
-        self.registers = {}
-        self.statexml = None
+	def __init__(self, resource, ns):
+		self.ns = ns
+		self.resource = resource
+		self.registers = {}
+		self.statexml = None
 
-    def registerStateCallback(self, current, new, callback):
-        self.registers[(current, new)] = callback
+	def registerStateCallback(self, current, new, callback):
+		self.registers[(current, new)] = callback
 
-    def setState(self, xml):
-        current = None
-        if self.statexml is not None:
-            current = self.statexml.tag
-        if (current, xml.tag) not in self.registers:
-            return False
-        passed = self.registers[(current, xml.tag)]
-        if passed:
-            self.statexml = xml
-            self.resource.saveState(xml)
+	def setState(self, xml, who=None):
+		current = None
+		if self.statexml is not None:
+			current = self.statexml.tag
+		xmlns = xml.tag.split('}')[-1]
+		if (current, xmlns) not in self.registers:
+			return False
+		passed = self.registers[(current, xmlns)](xml, who)
+		if passed:
+			self.updateState(xml)
+			self.resource.saveState(xml)
+		else:
+			self.rejectState(xml, who)
+		return passed
 
-    def getState(self):
-        if self.statexml is None:
-            return None
-        return self.statexml.tag
-    
-    def getXML(self):
-        return self.statexml
+	def updateState(self, xml, broadcast=True):
+		self.statexml = xml
+		if broadcast:
+			self.resource.notifyState(xml)
+
+	def getState(self):
+		if self.statexml is None:
+			return None
+		return self.statexml.tag
+	
+	def getXML(self):
+		return self.statexml
+
 
 class Subscription(object):
 	def __init__(self, node, jid=None, subid=None, config=None, to=None):
@@ -83,7 +93,7 @@ class Event(object):
 	
 	def cleanup(self):
 		self.jids = []
-
+	
 class ItemEvent(Event):
 	def __init__(self, name, item):
 		Event.__init__(self, name)
@@ -93,25 +103,10 @@ class ItemEvent(Event):
 		return item
 
 class QueueItemEvent(ItemEvent):
-    def __init__(self, name, item, bcast=None, rotation=0):
-        ItemEvent__init__(self, name, item)
-        self.bcast = bcast
-        self.rotation = rotation
-        self.idx = 0
-		subgen = None
-	
-	def reset(self):
-		self.idx = 0
-	
-	def setSubGen(self, subgen):
-		self.subgen = subgen
-	
-	def next(self):
-		if self.subgen is not None:
-			return self.subgen.next()
-		else:
-			return []
-		
+	def __init__(self, name, item, bcast=None, rotation=0):
+		ItemEvent.__init__(self, name, item)
+		self.bcast = bcast
+		self.rotation = rotation
 
 class DeleteEvent(ItemEvent):
 	pass
@@ -120,14 +115,19 @@ class ConfigEvent(Event):
 	pass
 
 class Item(object):
-	def __init__(self, node, name, who, payload=None, config=None):
+	state = None
+
+	def __init__(self, node, name, who, payload=None, config=None, state=None):
 		self.node = node
 		self.name = name
 		self.who = who
 		self.payload = payload
 		self.config = config
 		self.time = time.time()
-        self.state = None
+		if state is not None:
+			xmlns = state.tag.split("}")[0][1:]
+			if xmlns in self.state:
+				self.state[xmls].updateState(state,broadcast=False)
 	
 	def getpayload(self):
 		return self.payload
@@ -137,14 +137,44 @@ class Item(object):
 	
 	def getwho(self):
 		return self.who
+	
+	def setState(self, state, who):
+		xmlns = state.tag.split("}")[0][1:]
+		if xmlns not in self.state:
+			return False
+		return self.state[xmlns].setState(state, who)
 
-    def saveState(self, xml):
-        self.node._saveItemState(self.name, xml)
+	def saveState(self, xml):
+		self.node._saveItemState(self.name, xml)
+	
+	def notifyState(self, xml):
+		self.node.notifyState(xml, item_id=self.name)
 
 class QueueItem(Item):
-    def __init__(self, *args, **kwargs):
-        super(QueueItem, self).__init__()
-        self.state['http://andyet.net/protocol/pubsubqueue'] = StateMachine(self)
+	def __init__(self, *args, **kwargs):
+		self.claimed = ""
+		self.state = {}
+		self.state['http://andyet.net/protocol/pubsubqueue'] = StateMachine(self, 'http://andyet.net/protocol/pubsubqueue')
+		self.state['http://andyet.net/protocol/pubsubqueue'].registerStateCallback(None, "claimed", self.handleClaim)
+		self.state['http://andyet.net/protocol/pubsubqueue'].registerStateCallback("unclaimed", "claimed", self.handleClaim)
+		self.state['http://andyet.net/protocol/pubsubqueue'].registerStateCallback("claimed", "unclaimed", self.handleUnclaim)
+		super(QueueItem, self).__init__(*args, **kwargs)
+	
+	def handleClaim(self, request, who):
+		if self.claimed:
+			return False
+		if who.bare in self.node.subscriptionsbyjid or who.full in self.node.subscriptionsbyjid:
+			self.claimed = who.full
+			return True
+		return False
+	
+	def handleUnclaim(self, request, who):
+		if not self.claimed:
+			return False
+		if who.full == self.claimed or who.bare in self.node.affiliation['owner']:
+			self.claimed = ""
+			return True
+		return False
 
 class BaseNode(object):
 	nodetype = 'leaf'
@@ -182,8 +212,8 @@ class BaseNode(object):
 	del ntype
 	del model
 
-    item_class = Item
-    itemevent_class = ItemEvent
+	item_class = Item
+	itemevent_class = ItemEvent
 
 	def __init__(self, pubsub, db, name, config=None, owner=None, fresh=False):
 		self.new_owner = owner
@@ -199,7 +229,7 @@ class BaseNode(object):
 		self.items = {}
 		self.itemorder = []
 		self.synch = True
-        self.state = ''
+		self.state = ''
 		#self.affiliations = {'owner': [], 'publisher': [], 'member': [], 'outcast': [], 'pending': []}
 		self.affiliations = {}
 		for afftype in self.affiliationtypes:
@@ -241,8 +271,10 @@ class BaseNode(object):
 	def getAffiliations(self):
 		return self.affiliations
 	
+	def notifyState(self, xml, item_id=None):
+		pass
+	
 	def subscribe(self, jid, who=None, config=None, to=None):
-		#print(who, self.affiliations['owner'])
 		if (
 			(who is None or who in self.affiliations['owner'] or who.startswith(jid)) and 
 			(self.config['pubsub#access_model'] == 'open' or 
@@ -300,7 +332,6 @@ class BaseNode(object):
 			subscriber = self.subscriptions[subid]
 			jid = subscriber.getjid()
 			to = subscriber.getto()
-			logging.debug("%s: %s %s" % (jid, '/' in jid, self.config.get('pubsub#presence_based_delivery', False)))
 			if '/' in jid or not self.config.get('pubsub#presence_based_delivery', False):
 					result.append((jid, to))
 					if idx % step == 0:
@@ -343,7 +374,8 @@ class BaseNode(object):
 			item = self.items[id]
 			del self.items[id]
 			self.itemorder.pop(self.itemorder.index(id))
-			self.notifyDelete(ItemEvent(self, self.name, item))
+			self.notifyDelete(ItemEvent(self.name, item))
+		#TODO: DB
 	
 	def _checkconfigcollections(self, config, reconfigure=True):
 		collections = []
@@ -372,21 +404,21 @@ class BaseNode(object):
 		self.config.update(config)
 		# we do this regardless of cache settings
 		self.db.synch(self.name, config=pickle.dumps(self.config))
-    
-    def setState(self, state):
-        pass
-
-    def setItemState(self, item_id, state):
-        pass
 	
-    def _saveState(self, xml):
-        pass
-
-    def _saveItemState(self, node, xml):
-        pass
-
-	def deleteItem(self, item_id):
+	def setState(self, state, who):
 		pass
+
+	def setItemState(self, item_id, state, who=None):
+		if item_id in self.items:
+			return self.items[item_id].setState(state, who)
+		return False
+	
+	def _saveState(self, xml):
+		pass
+
+	def _saveItemState(self, node, xml):
+		pass
+
 	
 	def purgeNodeItems(self):
 		pass
@@ -420,7 +452,9 @@ class BaseNode(object):
 		item_id = event.item.name
 		payload = event.item.payload
 		jid=''
-		msg = self.xmpp.makeMessage(mto=jid, mfrom=self.xmpp.jid)
+		msg = self.xmpp.Message()
+		msg['to'] = jid
+		msg['from'] = self.xmpp.jid
 		xevent = ET.Element('{http://jabber.org/protocol/pubsub#event}event')
 		items = ET.Element('items', {'node': event.originalnode})
 		item = ET.Element('item', {'id': item_id})
@@ -436,8 +470,7 @@ class BaseNode(object):
 			jid, mto = toset[0]
 			if not event.hasJid(jid):
 				event.addJid(jid)
-				msg.attrib['to'] = jid
-				#print("Message is from", mto)
+				msg['to'] = jid
 				msg['from'] = mto or self.xmpp.jid
 				self.xmpp.send(msg)
 		for parent in self.collections:
@@ -460,6 +493,7 @@ class BaseNode(object):
 		for collection in self.collections:
 			self.collections.pop(self.collections.index(collection))
 
+
 class CollectionNode(BaseNode):
 
 	def publish(self, *args, **kwargs):
@@ -477,34 +511,39 @@ class QueueNode(BaseNode):
 	del bcast
 	default_config.addField('queue#bcaststep', label='Number of subscribers to step to in round robin', value='4')
 	default_config.addField('queue#wait', label='Seconds to wait for subscribers to claim', value='4')
-    item_class = QueueItem
-    itemevent_class = QueueItemEvent
+	item_class = QueueItem
+	itemevent_class = QueueItemEvent
 
-    def __init__(self, *args, **kwargs):
-        BaseNode.__init__(self, *args, **kwargs)
-        self.current_event = None
+	def __init__(self, *args, **kwargs):
+		BaseNode.__init__(self, *args, **kwargs)
+		self.current_event = None
+		self.current_iterator = None
 
-    def setState(self, state):
-        super(QueueNode, self).setState(state)
+	def setState(self, state):
+		super(QueueNode, self).setState(state)
 
-    def setItemState(self, item_id, state):
-        super(QueueNode, self).setState(state)
+	def setItemState(self, item_id, state, who=None):
+		passed = super(QueueNode, self).setItemState(item_id, state, who)
+		if passed and state.tag == "{http://andyet.net/protocol/pubsubqueue}claimed":
+			self.deleteItem(self.current_event.item.name)
+			self.current_event = None
+			if len(self.itemorder):
+				event = self.itemevent_class(self.items[self.itemorder[0]].name, self.items[self.itemorder[0]])
+				self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), .1, self.notifyItem, (event,))
+		return passed
 	
-    def notifyItem(self, event):
-		if event.hasNode(self.name) or self.current_event is None:
-            return
-		event.addNode(self.name)
-		subgen = self.eachSubscriber(step=int(self.config.get('queue#bcaststep', 1)))
-        event.setSubGen(subgen)
-        self._broadcast()
-		for parent in self.collections:
-			if parent in self.pubsub.nodes:
-				self.pubsub.nodes[parent].notifyItem(event)
-        
-    def _broadcast(self):
-        if self.current_event is None:
-            return
-        event = self.current_event
+	def notifyItem(self, event):
+		if self.current_event is not None and self.current_event != event:
+			return
+		if not self.current_event:
+			self.current_event = event
+		self.current_iterator = self.eachSubscriber()#step=int(self.config.get('queue#bcaststep', 1)))
+		self._broadcast()
+		
+	def _broadcast(self):
+		if self.current_event is None:
+			return
+		event = self.current_event
 		item_id = event.item.name
 		payload = event.item.payload
 		jid=''
@@ -520,16 +559,14 @@ class QueueNode(BaseNode):
 			msg['type'] = 'chat'
 		else:
 			msg.append(xevent)
-        try:
-            for jid, mto in event.next():
-                if not event.hasJid(jid):
-                    event.addJid(jid)
-                    msg.attrib['to'] = jid
-                    #print("Message is from", mto)
-                    msg['from'] = mto or self.xmpp.jid
-                    self.xmpp.send(msg)
-            self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), float(self.config.get('queue#wait', 3)), self._broadcast, tuple())
-        except StopIteration:
-            #start broadcasting again
-            self.current_event = None
-            self.notifyItem(event)
+		try:
+				jidset = self.current_iterator.next()
+				for jid, mto in jidset:
+					#event.addJid(jid)
+					msg.attrib['to'] = jid
+					msg['from'] = mto or self.xmpp.jid
+					self.xmpp.send(msg)
+				self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), 3, self._broadcast, tuple())
+		except StopIteration:
+			self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), .1, self.notifyItem, (event,))
+

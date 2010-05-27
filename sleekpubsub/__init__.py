@@ -7,7 +7,7 @@ from sleekxmpp.exceptions import XMPPError
 from xml.etree import cElementTree as ET
 import uuid
 from . db import PubsubDB
-from . node import BaseNode, CollectionNode
+from . node import BaseNode, CollectionNode, QueueNode
 import logging
 from . adhoc import PubsubAdhoc
 from . httpd import HTTPD
@@ -57,7 +57,6 @@ class NodeCache(object):
 	
 	def deleteNode(self, name):
 			if name in self.cache:
-				print("deleting node %s" % name)
 				del self.activenodes[name]
 				self.cache.pop(self.cache.index(name))
 			if name in self.allnodes:
@@ -89,12 +88,13 @@ class PublishSubscribe(object):
 		self.default_config = self.getDefaultConfig()
 		
 		self.admins = []
-		self.node_classes = {'leaf': BaseNode, 'collection': CollectionNode}
+		self.node_classes = {'leaf': BaseNode, 'collection': CollectionNode, 'queue': QueueNode}
 		self.nodes = NodeCache(self)
 		self.adhoc = PubsubAdhoc(self)
 		self.http = HTTPD(self)
 
 		#self.xmpp.registerHandler(Callback('pubsub publish', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub'><publish xmlns='http://jabber.org/protocol/pubsub' /></pubsub></iq>" % self.xmpp.default_ns), self.handlePublish)) 
+		self.xmpp.registerHandler(Callback('pubsub state', StanzaPath('iq@type=set/psstate'), self.handleSetState))
 		self.xmpp.registerHandler(Callback('pubsub publish', StanzaPath("iq@type=set/pubsub/publish"), self.handlePublish)) 
 		self.xmpp.registerHandler(Callback('pubsub create', StanzaPath("iq@type=set/pubsub/create"), self.handleCreateNode)) 
 		self.xmpp.registerHandler(Callback('pubsub configure', StanzaPath("iq@type=set/pubsub_owner/configure"), self.handleConfigureNode))
@@ -122,6 +122,7 @@ class PublishSubscribe(object):
 		if pfrom: pfrom += "@"
 		pfrom += self.xmpp.jid
 		self.xmpp.sendPresence(pto=pres['from'].bare, pfrom=pfrom)
+	
 
 	def handlePresenceSubscribe(self, pres):
 		ifrom = pres['from'].bare
@@ -237,6 +238,21 @@ class PublishSubscribe(object):
 			stanza['pubsub']['publish'].append(item)
 		stanza.send()
 	
+	def handleSetState(self, iq):
+		node = self.nodes.get(iq['psstate']['node'])
+		payload = iq['psstate']['payload']
+		if node is None:
+			raise XMPPError('item-not-found')
+		item = iq['psstate']['item']
+		if item is not None:
+			result = node.setItemState(item, payload, iq['from'])
+			if result:
+				iq.reply()
+				iq['psstate']['payload'] = payload
+				iq.send()
+			else:
+				raise XMPPError('not-allowed')
+	
 	def publish(self, node, item, id=None, who=None):
 		if isinstance(node, str):
 			node = self.nodes.get(node)
@@ -264,8 +280,6 @@ class PublishSubscribe(object):
 	def handleCreateNode(self, iq):
 		node = iq['pubsub']['create']['node'] or uuid.uuid4().hex
 		config = iq['pubsub']['configure']['config'] or self.default_config
-		logging.debug("Configuration XML is %s" % ET.tostring(iq['pubsub']['configure'].xml))
-		logging.debug("The configuration is: %s" % iq['pubsub']['configure']['config'].getValues())
 		if node in self.nodes:
 			raise XMPPError('conflict', etype='cancel')
 		if not self.createNode(node, config, iq['from'].full):
