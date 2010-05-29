@@ -7,7 +7,7 @@ from sleekxmpp.exceptions import XMPPError
 from xml.etree import cElementTree as ET
 import uuid
 from . db import PubsubDB
-from . node import BaseNode, CollectionNode, QueueNode
+from . node import BaseNode, CollectionNode, QueueNode, JobNode
 import logging
 from . adhoc import PubsubAdhoc
 from . httpd import HTTPD
@@ -88,7 +88,7 @@ class PublishSubscribe(object):
 		self.default_config = self.getDefaultConfig()
 		
 		self.admins = []
-		self.node_classes = {'leaf': BaseNode, 'collection': CollectionNode, 'queue': QueueNode}
+		self.node_classes = {'leaf': BaseNode, 'collection': CollectionNode, 'queue': QueueNode, 'job': JobNode}
 		self.nodes = NodeCache(self)
 		self.adhoc = PubsubAdhoc(self)
 		self.http = HTTPD(self)

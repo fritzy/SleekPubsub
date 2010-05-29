@@ -4,7 +4,7 @@ import sleekxmpp.componentxmpp
 import logging
 #import logging.handlers
 import sleekpubsub
-import sleekpubsub.jobnode
+#import sleekpubsub.jobnode
 
 try:
 	import configparser
@@ -123,7 +123,7 @@ if __name__ == '__main__':
 	xmpp.registerPlugin('xep_0050')
 	xmpp.registerPlugin('xep_0060')
 	pubsub = sleekpubsub.PublishSubscribe(xmpp, config.get('pubsub', 'dbfile'), config)
-	pubsub.registerNodeType(sleekpubsub.jobnode)
+	#pubsub.registerNodeType(sleekpubsub.jobnode)
 
 	if xmpp.connect():
 		xmpp.process(threaded=False)

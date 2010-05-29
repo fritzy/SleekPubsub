@@ -21,7 +21,7 @@ class StateMachine(object):
 	def setState(self, xml, who=None):
 		current = None
 		if self.statexml is not None:
-			current = self.statexml.tag
+			current = self.statexml.tag.split('}')[-1]
 		xmlns = xml.tag.split('}')[-1]
 		if (current, xmlns) not in self.registers:
 			return False
@@ -175,6 +175,40 @@ class QueueItem(Item):
 			self.claimed = ""
 			return True
 		return False
+
+class JobQueueItem(Item):
+	def __init__(self, *args, **kwargs):
+		self.claimed = ""
+		self.state = {}
+		self.state['http://andyet.net/protocol/pubsubjob'] = StateMachine(self, 'http://andyet.net/protocol/pubsubjob')
+		self.state['http://andyet.net/protocol/pubsubjob'].registerStateCallback(None, "claimed", self.handleClaim)
+		self.state['http://andyet.net/protocol/pubsubjob'].registerStateCallback("unclaimed", "claimed", self.handleClaim)
+		self.state['http://andyet.net/protocol/pubsubjob'].registerStateCallback("claimed", "unclaimed", self.handleUnclaim)
+		self.state['http://andyet.net/protocol/pubsubjob'].registerStateCallback("claimed", "finished", self.handleFinished)
+		super(JobQueueItem, self).__init__(*args, **kwargs)
+	
+	def handleClaim(self, request, who):
+		if self.claimed:
+			return False
+		if who.bare in self.node.subscriptionsbyjid or who.full in self.node.subscriptionsbyjid:
+			self.claimed = who.full
+			return True
+		return False
+	
+	def handleUnclaim(self, request, who):
+		if not self.claimed:
+			return False
+		if who.full == self.claimed or who.bare in self.node.affiliation['owner']:
+			self.claimed = ""
+			return True
+		return False
+
+	def handleFinished(self, request, who):
+		if not self.claimed:
+			return False
+		if who.full != self.claimed:
+			return False
+		return True
 
 class BaseNode(object):
 	nodetype = 'leaf'
@@ -339,7 +373,7 @@ class BaseNode(object):
 						result = []
 					idx += 1
 			else:
-				for resource in self.xmpp.roster.get(jid, {'presence': []})['presence']:
+				for resource in self.xmpp.roster.get(jid, {'presence': {}})['presence'].copy():
 					result.append(("%s/%s" % (jid, resource), to))
 					if idx % step == 0:
 						yield result
@@ -529,7 +563,7 @@ class QueueNode(BaseNode):
 			self.current_event = None
 			if len(self.itemorder):
 				event = self.itemevent_class(self.items[self.itemorder[0]].name, self.items[self.itemorder[0]])
-				self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), .1, self.notifyItem, (event,))
+				self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), 0, self.notifyItem, (event,))
 		return passed
 	
 	def notifyItem(self, event):
@@ -569,4 +603,20 @@ class QueueNode(BaseNode):
 				self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), 3, self._broadcast, tuple())
 		except StopIteration:
 			self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), .1, self.notifyItem, (event,))
+
+class JobNode(QueueNode):
+	item_class = JobQueueItem
+
+	def setItemState(self, item_id, state, who=None):
+		passed = BaseNode.setItemState(self, item_id, state, who)
+		if passed and state.tag == "{http://andyet.net/protocol/pubsubjob}claimed":
+			#self.deleteItem(self.current_event.item.name)
+			self.current_event = None
+			idx = self.itemorder.index(item_id)
+			if len(self.itemorder) - idx - 1 > 0:
+				event = self.itemevent_class(self.items[self.itemorder[idx+1]].name, self.items[self.itemorder[idx+1]])
+				self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), 0, self.notifyItem, (event,))
+		elif passed and state.tag == "{http://andyet.net/protocol/pubsubjob}finished":
+			self.deleteItem(item_id)
+		return passed
 
