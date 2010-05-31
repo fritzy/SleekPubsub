@@ -7,6 +7,7 @@ import uuid
 import logging
 import pickle
 import time
+import random
 
 class StateMachine(object):
 	def __init__(self, resource, ns):
@@ -70,8 +71,8 @@ class Subscription(object):
 	def getid(self):
 		return self.subid
 
-	def config(self):
-		return config
+	def getconfig(self):
+		return self.config
 	
 class Event(object):
 	def __init__(self, node):
@@ -148,7 +149,7 @@ class Item(object):
 		self.node._saveItemState(self.name, xml)
 	
 	def notifyState(self, xml):
-		self.node.notifyState(xml, item_id=self.name)
+		self.node.notifyItemState(xml, item_id=self.name)
 
 class QueueItem(Item):
 	def __init__(self, *args, **kwargs):
@@ -226,7 +227,7 @@ class BaseNode(object):
 	default_config.addField('pubsub#notify_retract', 'boolean', label='Notify subscribers when items are removed from the node', value=False)
 	default_config.addField('pubsub#notify_sub', 'boolean', label='Notify owners about new subscribers and unsubscribes', value=False)
 	default_config.addField('pubsub#persist_items', 'boolean', label='Persist items in storage', value=False)
-	default_config.addField('pubsub#max_items', label='Max # of items to persist', value='10')
+	default_config.addField('pubsub#max_items', label='Max # of items to persist', value='100')
 	default_config.addField('pubsub#subscribe', 'boolean', label='Whether to allow subscriptions', value=True)
 	default_config.addField('pubsub#collection', 'text-multi', label="This node in collections")
 	default_config.addField('sleek#saveonchange', 'boolean', label='Save on every change', value=False)
@@ -289,12 +290,17 @@ class BaseNode(object):
 		else:
 			self.db.createNode(self.name, self.config, self.affiliations, self.items)
 
-	def dbDump(self):
-		self.db.synch(self.name, pickle.dumps(self.config), self.affiliations, self.items)
+	def dbDump(self, save=False):
+		if save:
+			self.db.synch(self.name, pickle.dumps(self.config), self.affiliations, self.items, subscriptions=self.subscriptions)
+		else:
+			self.db._synch(self.name, pickle.dumps(self.config), self.affiliations, self.items, subscriptions=self.subscriptions)
 		self.lastsaved = time.time()
 
 	def save(self):
-		self.dbDump()
+		logging.info("Saving %s" % self.name)
+		#self.dbDump(True)
+		self.db._synch(self.name, pickle.dumps(self.config), self.affiliations, self.items, subscriptions=self.subscriptions, newdb=True)
 
 	def discoverItems(self):
 		pass
@@ -305,8 +311,31 @@ class BaseNode(object):
 	def getAffiliations(self):
 		return self.affiliations
 	
-	def notifyState(self, xml, item_id=None):
-		pass
+	def notifyItemState(self, xml, item_id=None, who=None):
+		msg = self.xmpp.Message()
+		msg['psstate_event']['psstate']['node'] = self.name
+		msg['psstate_event']['psstate']['item'] = item_id
+		msg['psstate_event']['psstate']['payload'] = xml
+		for step in self.eachSubscriber():
+			for jid, mto in step:
+				msg['from'] = mto
+				msg['to'] = jid
+				msg.send()
+		for affiliation in self.affiliations:
+			if affiliation == 'member':
+				continue
+			for barejid in self.affiliations[affiliation]:
+				resources = self.xmpp.roster.get(barejid, {'presence': {}})['presence'].keys()
+				if resources:
+					for resource in resources:
+						msg['from'] = self.xmpp.jid
+						msg['to'] = "%s/%s" % (barejid, resource)
+						msg.send()
+				else:
+						msg['from'] = self.xmpp.jid
+						msg['to'] = barejid
+						msg.send()
+
 	
 	def subscribe(self, jid, who=None, config=None, to=None):
 		if (
@@ -365,23 +394,25 @@ class BaseNode(object):
 		for subid in subscriptions:
 			subscriber = self.subscriptions[subid]
 			jid = subscriber.getjid()
-			to = subscriber.getto()
+			mto = subscriber.getto()
 			if '/' in jid or not self.config.get('pubsub#presence_based_delivery', False):
-					result.append((jid, to))
+					result.append((jid, mto))
 					if idx % step == 0:
 						yield result
 						result = []
 					idx += 1
 			else:
-				for resource in self.xmpp.roster.get(jid, {'presence': {}})['presence'].copy():
-					result.append(("%s/%s" % (jid, resource), to))
+				resources = self.xmpp.roster.get(jid, {'presence': {}})['presence'].keys()
+				random.shuffle(resources)
+				for resource in resources:
+					result.append(("%s/%s" % (jid, resource), mto))
 					if idx % step == 0:
 						yield result
 						result = []
 					idx += 1
 	
 	def publish(self, item, item_id=None, options=None, who=None):
-		if item_id is None:
+		if not item_id:
 			item_id = uuid.uuid4().hex
 		if item.tag == '{http://jabber.org/protocol/pubsub}item':
 			payload = item.getchildren()[0]
@@ -562,7 +593,7 @@ class QueueNode(BaseNode):
 			self.deleteItem(self.current_event.item.name)
 			self.current_event = None
 			if len(self.itemorder):
-				event = self.itemevent_class(self.items[self.itemorder[0]].name, self.items[self.itemorder[0]])
+				event = self.itemevent_class(self.name, self.items[self.itemorder[0]])
 				self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), 0, self.notifyItem, (event,))
 		return passed
 	
@@ -579,6 +610,9 @@ class QueueNode(BaseNode):
 			return
 		event = self.current_event
 		item_id = event.item.name
+		if item_id not in self.itemorder:
+			self.current_event = None
+			return
 		payload = event.item.payload
 		jid=''
 		msg = self.xmpp.makeMessage(mto=jid, mfrom=self.xmpp.jid)
@@ -594,29 +628,36 @@ class QueueNode(BaseNode):
 		else:
 			msg.append(xevent)
 		try:
-				jidset = self.current_iterator.next()
-				for jid, mto in jidset:
-					#event.addJid(jid)
-					msg.attrib['to'] = jid
-					msg['from'] = mto or self.xmpp.jid
-					self.xmpp.send(msg)
-				self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), 3, self._broadcast, tuple())
+			jidset = self.current_iterator.next()
+			for jid, mto in jidset:
+			#for step in self.eachSubscriber():
+				#for jid, mto in step:
+				msg.attrib['to'] = jid
+				msg['from'] = mto or self.xmpp.jid
+				self.xmpp.send(msg)
+				#self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), 0, self._broadcast, tuple())
+			self._broadcast()
 		except StopIteration:
-			self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), .1, self.notifyItem, (event,))
+			self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), 3, self.notifyItem, (event,))
 
 class JobNode(QueueNode):
 	item_class = JobQueueItem
 
 	def setItemState(self, item_id, state, who=None):
 		passed = BaseNode.setItemState(self, item_id, state, who)
-		if passed and state.tag == "{http://andyet.net/protocol/pubsubjob}claimed":
+		if passed and state.tag == "{http://andyet.net/protocol/pubsubjob}claimed" and self.current_event.item.name == item_id:
 			#self.deleteItem(self.current_event.item.name)
 			self.current_event = None
 			idx = self.itemorder.index(item_id)
-			if len(self.itemorder) - idx - 1 > 0:
-				event = self.itemevent_class(self.items[self.itemorder[idx+1]].name, self.items[self.itemorder[idx+1]])
-				self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), 0, self.notifyItem, (event,))
+			for nitem_id in self.itemorder:
+				if self.items[nitem_id].state['http://andyet.net/protocol/pubsubjob'].statexml is None or self.items[nitem_id].state['http://andyet.net/protocol/pubsubjob'].statexml.tag == '{http://andyet.net/protocol/pubsubjob}unclaimed':
+					event = self.itemevent_class(self.name, self.items[nitem_id])
+					#self.xmpp.schedule("%s::%s::bcast" % (self.name, nitem_id), 0, self.notifyItem, (event,))
+					self.notifyItem(event)
+					break
 		elif passed and state.tag == "{http://andyet.net/protocol/pubsubjob}finished":
 			self.deleteItem(item_id)
+			if not len(self.itemorder):
+				self.current_event = None
 		return passed
 

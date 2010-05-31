@@ -6,6 +6,7 @@ try:
 	import queue
 except ImportError:
 	import Queue as queue
+import logging
 
 class PubsubDB(object):
 	
@@ -131,18 +132,26 @@ class PubsubDB(object):
 	
 	
 	def synch(self, node, config=None, affiliations={}, items={}, subscriptions=[]):
+		logging.debug("starting synch")
 		self.win.put((None, self._synch, (node, config, affiliations, items, subscriptions)))
 
-	def _synch(self, node, config=None, affiliations={}, items={}, subscriptions=[]):
+	def _synch(self, node, config=None, affiliations={}, items={}, subscriptions=[], newdb=False):
+		logging.debug("synchnig up with %s" % node)
+		if newdb:
+			self.conn = sqlite3.connect(self.file)
 		c = self.conn.cursor()
 		c.execute('select id from node where name=?', (node,))
 		id = c.fetchone()
 		if id is not None:
+			logging.debug("found db row")
 			id = id[0]
 			updates = []
 			for aftype in affiliations:
 				for jid in affiliations[aftype]:
-					c.execute('replace into affiliation (node_id, jid, type) values (?,?,?)', (id, jid, aftype))
+					c = self.conn.cursor()
+					c.execute('select id from affiliation where node_id=? and jid=? and type=?', (id, jid, aftype))
+					if c.fetchone() is None:
+						c.execute('insert into affiliation (node_id, jid, type) values (?,?,?)', (id, jid, aftype))
 			if config is not None:
 				c.execute('update node set config=? where name=?', (config, node))
 			updates = [(id, item_name, items[item_name].getpayload(), items[item_name].gettime(), items[item_name].getwho()) for item_name in items]
@@ -150,9 +159,15 @@ class PubsubDB(object):
 				pass
 				#print(update)
 				#c.execute('replace into item (node_id, name, payload, time, who) values (?,?,?,?,?)', update)
-			updates = [(id, sub.getjid(), sub.getconfig(), sub.getid()) for sub in subscriptions]
+			updates = [(id, subscriptions[sub].getjid(), subscriptions[sub].getconfig(), subscriptions[sub].getid()) for sub in subscriptions]
 			for update in updates:
-				c.execute('replace into subscription (node_id, jid, config, subid) values (?,?,?,?)', update)
+				c = self.conn.cursor()
+				c.execute('select id from subscription where subid=?', (update[-1],))
+				sid = c.fetchone()
+				if sid is None:
+					c.execute('insert into subscription (node_id, jid, config, subid) values (?,?,?,?)', update)
+				else:
+					c.execute('update subscription set node_id=?, jid=?, config=? where subid=?', update)
 			self.conn.commit()
 		c.close()
 	

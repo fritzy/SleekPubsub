@@ -31,6 +31,7 @@ class NodeCache(object):
 		return self.activenodes[key]
 
 	def __contains__(self, key):
+		logging.debug("searching %s for %s" % (self.allnodes, key))
 		return key in self.allnodes
 
 	def get(self, key, default=None):
@@ -47,6 +48,10 @@ class NodeCache(object):
 		self.activenodes[name] = self.pubsub.node_classes.get(self.allnodes[name], BaseNode)(self.pubsub, self.pubsub.db, name)
 		self.cache.append(name)
 		self.clearExtra()
+	
+	def saveAll(self):
+		for node in self.allnodes:
+			self[node].save()
 	
 	def addNode(self, name, klass, node=None):
 		self.allnodes[name] = klass
@@ -116,6 +121,9 @@ class PublishSubscribe(object):
 			if not pfrom: pfrom = self.xmpp.jid
 			self.xmpp.sendPresence(pto=jid, ptype='probe', pfrom=pfrom)
 			self.xmpp.sendPresence(pto=jid, pfrom=pfrom)
+
+	def save(self):
+		self.nodes.saveAll()
 
 	def handleGotOnline(self, pres):
 		pfrom = pres['to'].user

@@ -90,6 +90,7 @@ if __name__ == '__main__':
 	optp.add_option("-c","--config", dest="configfile", default="config.ini", help="set config file to use")
 	opts,args = optp.parse_args()
 
+	retCode = 0
 	if opts.daemonize:
 		retCode = createDaemon()
 	
@@ -128,7 +129,8 @@ if __name__ == '__main__':
 	if xmpp.connect():
 		xmpp.process(threaded=False)
 		xmpp.disconnect()
-		print("ok?")
-		sys.exit(0)
+		logging.info("Saving...")
+		pubsub.save()
+		sys.exit(retCode)
 	else:
 		logging.log(logging.CRITICAL, "Unable to connect.")
