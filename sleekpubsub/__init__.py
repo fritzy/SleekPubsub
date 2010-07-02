@@ -134,7 +134,7 @@ class PublishSubscribe(object):
 		self.xmpp.sendPresence(pto=pres['from'].bare, pfrom=pfrom)
 
 	def handleGotOffline(self, pres):
-		if not self.roster.has_key(pres['from'].bare):
+		if not self.xmpp.roster.has_key(pres['from'].bare):
 			for node in self.presence_expire.get(pres['from'].bare, {}):
 				if node in self.nodes:
 					subid = self.nodes.subscriptionsbyjid.get(pres['from'].bare)
@@ -285,7 +285,7 @@ class PublishSubscribe(object):
 		if config is None:
 			config = self.default_config.copy()
 			for option in self.config.options('defaultnodeconfig'):
-				config[option] = self.config.get('defaultnodeconfig', option)
+				config.setValues({option: self.config.get('defaultnodeconfig', option)})
 		else:
 			config = self.default_config.merge(config)
 		config = config.getValues()
@@ -334,7 +334,7 @@ class PublishSubscribe(object):
 				self.createNode(node, config=None, who=who)
 			else:
 				return False
-		if self.nodes.config.get('pubsub#expire') == 'presence':
+		if self.nodes[node].config.get('pubsub#expire') == 'presence':
 			if not self.xmpp.roster.has_key(who):
 				return False
 			else:
