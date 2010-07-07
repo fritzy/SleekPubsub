@@ -329,24 +329,28 @@ class PublishSubscribe(object):
 		self.xmpp.send(iq)
 	
 	def subscribeNode(self, node, jid, who=None, to=None):
+		print "subscribing..."
 		if node not in self.nodes:
 			if self.config.get('settings', 'node_creation') == 'createonsubscribe':
 				self.createNode(node, config=None, who=who)
 			else:
+				print "node not found and not createonsubscribe"
 				return False
 		if self.nodes[node].config.get('pubsub#expire') == 'presence':
 			if not self.xmpp.roster.has_key(who):
+				"tried to create the node, but the user isn't in the roster"
 				return False
 			else:
 				if who not in self.presence_expire:
 					self.presence_expire[who] = []
 				self.presence_expire[who].append(node)
+		print "calling node subscribe"
 		return self.nodes[node].subscribe(jid, who, to=to)
 	
 	def handleSubscribe(self, stanza):
 		node = stanza['pubsub']['subscribe']['node']
 		jid = stanza['pubsub']['subscribe']['jid'].full
-		subid = self.subscribeNode(node, jid, stanza['from'].bare)
+		subid = self.subscribeNode(node, jid, stanza['from'].full)
 		if not subid:
 			self.xmpp.send(self.xmpp.makeIqError(xml.get('id')))
 			return

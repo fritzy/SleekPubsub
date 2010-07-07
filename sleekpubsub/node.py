@@ -338,6 +338,8 @@ class BaseNode(object):
 
 	
 	def subscribe(self, jid, who=None, config=None, to=None):
+		print jid, who
+		print bool((who is None or who in self.affiliations['owner'] or who.startswith(jid)))
 		if (
 			(who is None or who in self.affiliations['owner'] or who.startswith(jid)) and 
 			(self.config['pubsub#access_model'] == 'open' or 
