@@ -338,13 +338,11 @@ class BaseNode(object):
 
 	
 	def subscribe(self, jid, who=None, config=None, to=None):
-		print jid, who
-		print bool((who is None or who in self.affiliations['owner'] or who.startswith(jid)))
 		if (
-			(who is None or who in self.affiliations['owner'] or who.startswith(jid)) and 
+			(who is None or self.xmpp.getjidbare(who) in self.affiliations['owner'] or who.startswith(jid)) and 
 			(self.config['pubsub#access_model'] == 'open' or 
 				(self.config['pubsub#access_model'] == 'whitelist' and jid in self.affiliations['member']) or
-				(who in self.affiliations['owner'])
+				(self.xmpp.getjidbare(who) in self.affiliations['owner'])
 			)
 		):
 			subid = uuid.uuid4().hex

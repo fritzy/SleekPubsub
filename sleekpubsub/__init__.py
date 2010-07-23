@@ -352,7 +352,7 @@ class PublishSubscribe(object):
 		jid = stanza['pubsub']['subscribe']['jid'].full
 		subid = self.subscribeNode(node, jid, stanza['from'].full)
 		if not subid:
-			self.xmpp.send(self.xmpp.makeIqError(xml.get('id')))
+			self.xmpp.send(self.xmpp.makeIqError(stanza['id']))
 			return
 		stanza.reply()
 		stanza.clear()
