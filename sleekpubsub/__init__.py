@@ -200,8 +200,9 @@ class PublishSubscribe(object):
 		return default_config
 	
 	def loadNodes(self):
-		for node, node_type in self.db.getNodes():
-			self.nodes.addNode(node, node_type)
+		if self.config.get('settings', 'node_creation') != 'createonsubscribe':
+			for node, node_type in self.db.getNodes():
+				self.nodes.addNode(node, node_type)
 #[node] = self.node_classes.get(node_type, BaseNode)(self, self.db, node)
 
 	def registerNodeType(self, nodemodule):
