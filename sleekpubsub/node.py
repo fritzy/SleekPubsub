@@ -277,6 +277,8 @@ class BaseNode(object):
 		self.lastsaved = time.time()
 	
 	def dbLoad(self):
+		if self.pubsub.config.get('settings', 'node_creation') == 'createonsubscribe':
+			return
 		if not self.fresh:
 			self.affiliations = self.db.getAffiliations(self.name)
 			self.items = self.db.getItems(self.name)
@@ -291,6 +293,8 @@ class BaseNode(object):
 			self.db.createNode(self.name, self.config, self.affiliations, self.items)
 
 	def dbDump(self, save=False):
+		if self.pubsub.config.get('settings', 'node_creation') == 'createonsubscribe':
+			return
 		if save:
 			self.db.synch(self.name, pickle.dumps(self.config), self.affiliations, self.items, subscriptions=self.subscriptions)
 		else:
@@ -298,6 +302,8 @@ class BaseNode(object):
 		self.lastsaved = time.time()
 
 	def save(self):
+		if self.pubsub.config.get('settings', 'node_creation') == 'createonsubscribe':
+			return
 		logging.info("Saving %s" % self.name)
 		#self.dbDump(True)
 		self.db._synch(self.name, pickle.dumps(self.config), self.affiliations, self.items, subscriptions=self.subscriptions, newdb=True)
@@ -350,7 +356,7 @@ class BaseNode(object):
 				config = ET.tostring(config.getXML('submit'))
 			self.subscriptions[subid] = Subscription(self, jid, subid, config, to)
 			self.subscriptionsbyjid[jid] = self.subscriptions[subid]
-			if self.config['sleek#saveonchange']:
+			if self.config['sleek#saveonchange'] and self.pubsub.config.get('settings', 'node_creation') != 'createonsubscribe':
 				self.db.addSubscription(self.name, jid, subid, config, to)
 			return subid
 		else:
@@ -360,7 +366,7 @@ class BaseNode(object):
 	def unsubscribe(self, jid, who=None, subid=None):
 		if subid is None:
 			subid = self.subscriptionsbyjid[jid].getid()
-		if self.config['sleek#saveonchange']:
+		if self.config['sleek#saveonchange'] and self.pubsub.config.get('settings', 'node_creation') != 'createonsubscribe':
 			self.db.deleteSubscription(self.name, jid, subid)
 		try:
 			del self.subscriptions[subid]
@@ -420,7 +426,7 @@ class BaseNode(object):
 			payload = item
 		item_inst = self.item_class(self, item_id, who, payload, options)
 		if self.config.get('pubsub#persist_items', False):
-			if self.config['sleek#saveonchange']:
+			if self.config['sleek#saveonchange'] and self.pubsub.config.get('settings', 'node_creation') != 'createonsubscribe':
 				self.db.setItem(self.name, item_id, payload)
 			self.items[item_id] = item_inst
 			if item_id not in self.itemorder:
@@ -468,7 +474,8 @@ class BaseNode(object):
 			raise XMPPError() #TODO make this the right error
 		self.config.update(config)
 		# we do this regardless of cache settings
-		self.db.synch(self.name, config=pickle.dumps(self.config))
+		if self.pubsub.config.get('settings', 'node_creation') != 'createonsubscribe':
+			self.db.synch(self.name, config=pickle.dumps(self.config))
 	
 	def setState(self, state, who):
 		pass
@@ -501,7 +508,7 @@ class BaseNode(object):
 			if key not in self.affiliationtypes:
 				return False
 		self.affiliations.update(affiliations)
-		if self.config['sleek#saveonchange']:
+		if self.config['sleek#saveonchange'] and self.pubsub.config.get('settings', 'node_creation') != 'createonsubscribe':
 			self.db.synch(self.name, affiliations=self.affiliations)
 		return True
 	
@@ -650,11 +657,14 @@ class JobNode(QueueNode):
 			self.current_event = None
 			idx = self.itemorder.index(item_id)
 			for nitem_id in self.itemorder:
+				sent = 0
 				if self.items[nitem_id].state['http://andyet.net/protocol/pubsubjob'].statexml is None or self.items[nitem_id].state['http://andyet.net/protocol/pubsubjob'].statexml.tag == '{http://andyet.net/protocol/pubsubjob}unclaimed':
 					event = self.itemevent_class(self.name, self.items[nitem_id])
 					#self.xmpp.schedule("%s::%s::bcast" % (self.name, nitem_id), 0, self.notifyItem, (event,))
 					self.notifyItem(event)
-					break
+					sent += 1
+					if sent > 2:
+						break
 		elif passed and state.tag == "{http://andyet.net/protocol/pubsubjob}finished":
 			self.deleteItem(item_id)
 			if not len(self.itemorder):

@@ -50,8 +50,9 @@ class NodeCache(object):
 		self.clearExtra()
 	
 	def saveAll(self):
-		for node in self.allnodes:
-			self[node].save()
+		if self.pubsub.config.get('settings', 'node_creation') != 'createonsubscribe':
+			for node in self.allnodes:
+				self[node].save()
 	
 	def addNode(self, name, klass, node=None):
 		self.allnodes[name] = klass
@@ -77,7 +78,8 @@ class NodeCache(object):
 			self.clear(node)
 	
 	def clear(self, node):
-		self.activenodes[node].save()
+		if self.pubsub.config.get('settings', 'node_creation') != 'createonsubscribe':
+			self.activenodes[node].save()
 		del self.activenodes[node]
 		self.cache.pop(self.cache.index(node))
 	
