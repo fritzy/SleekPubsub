@@ -11,6 +11,7 @@ from . node import BaseNode, CollectionNode, QueueNode, JobNode
 import logging
 from . adhoc import PubsubAdhoc
 from . httpd import HTTPD
+import copy
 
 class NodeCache(object):
 	"""Manages nodes in memory, keeping most recently accessed in memory"""
@@ -286,7 +287,7 @@ class PublishSubscribe(object):
 	
 	def createNode(self, node, config=None, who=None):
 		if config is None:
-			config = self.default_config.copy()
+			config = copy.copy(self.default_config)
 			for option in self.config.options('defaultnodeconfig'):
 				config.setValues({option: self.config.get('defaultnodeconfig', option)})
 		else:
@@ -395,7 +396,7 @@ class PublishSubscribe(object):
 	def getNodeConfig(self, node):
 		if node not in self.nodes:
 			return False
-		config = self.default_config.copy()
+		config = copy.copy(self.default_config)
 		config.setValues(self.nodes[node].getConfig())
 		return config
 

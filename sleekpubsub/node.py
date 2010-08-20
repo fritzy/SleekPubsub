@@ -8,6 +8,7 @@ import logging
 import pickle
 import time
 import random
+import copy
 
 class StateMachine(object):
 	def __init__(self, resource, ns):
@@ -258,7 +259,7 @@ class BaseNode(object):
 		self.db = db
 		self.name = name
 		self.collections = []
-		self.config = config or self.default_config.copy()
+		self.config = config or copy.copy(self.default_config)
 		self.subscription_form = {}
 		self.publish_form = {}
 		self.items = {}
@@ -575,7 +576,7 @@ class CollectionNode(BaseNode):
 		return False
 
 class QueueNode(BaseNode):
-	default_config = BaseNode.default_config.copy()
+	default_config = copy.copy(BaseNode.default_config)
 	bcast = default_config.addField("queue#braodcast", "list-single", label="Broadcast behavior", value="broadcast")
 	bcast.addOption('broadcast', 'Broadcast')
 	bcast.addOption('roundrobin', "Round Robin")
