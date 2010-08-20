@@ -421,6 +421,11 @@ class BaseNode(object):
 	def publish(self, item, item_id=None, options=None, who=None):
 		if not item_id:
 			item_id = uuid.uuid4().hex
+		self.xmpp.schedule("%s::%s::publish" % (self.name, item_id), 0, self._publish, (item,item_id, options, who))
+		return item_id
+
+	def _publish(self, item, item_id=None, options=None, who=None):
+		print item, item_id, options, who
 		if item.tag == '{http://jabber.org/protocol/pubsub}item':
 			payload = item.getchildren()[0]
 		else:
@@ -439,7 +444,6 @@ class BaseNode(object):
 		max_items = int(self.config.get('pubsub#max_items', 0))
 		if max_items != 0 and len(self.itemorder) > max_items:
 			self.deleteItem(self.itemorder[0])
-		return item_id # item id
 
 	def deleteItem(self, id):
 		if id in self.items:
