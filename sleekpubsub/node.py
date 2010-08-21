@@ -180,7 +180,9 @@ class QueueItem(Item):
 
 class JobQueueItem(Item):
 	def __init__(self, *args, **kwargs):
+		self.claimtime = None
 		self.claimed = ""
+		self.cancel_counter = 0
 		self.state = {}
 		self.state['http://andyet.net/protocol/pubsubjob'] = StateMachine(self, 'http://andyet.net/protocol/pubsubjob')
 		self.state['http://andyet.net/protocol/pubsubjob'].registerStateCallback(None, "claimed", self.handleClaim)
@@ -655,22 +657,40 @@ class QueueNode(BaseNode):
 class JobNode(QueueNode):
 	item_class = JobQueueItem
 
+	def __init__(self, *args, **kwargs):
+		QueueNode.__init__(self, *args, **kwargs)
+		self.xmpp.schedule("%s::node_maintenance" % (self.name,),  5, self.maintenance, repeat=True)
+
+	def maintenance(self):
+		for item_id in self.items:
+			item = self.items[item_id]
+			print "state of%s::%s = %s" % (self.name, item_id, item.state['http://andyet.net/protocol/pubsubjob'].getState())
+			if item.state['http://andyet.net/protocol/pubsubjob'].getState() == "{http://andyet.net/protocol/pubsubjob}claimed":
+				if item.claimtime is not None and time.time() - item.claimtime > 5.0:
+					print "%s::%s timed out" % (self.name, item_id)
+					self.setItemState(item_id,  "{http://andyet.net/protocol/pubsubjob}unclaimed")
+				
 	def setItemState(self, item_id, state, who=None):
 		passed = BaseNode.setItemState(self, item_id, state, who)
 		if passed and state.tag == "{http://andyet.net/protocol/pubsubjob}claimed" and self.current_event.item.name == item_id:
 			#self.deleteItem(self.current_event.item.name)
 			self.current_event = None
+			self.items[item_id].claimtime = time.time()
 			idx = self.itemorder.index(item_id)
 			for nitem_id in self.itemorder:
-				sent = 0
 				if self.items[nitem_id].state['http://andyet.net/protocol/pubsubjob'].statexml is None or self.items[nitem_id].state['http://andyet.net/protocol/pubsubjob'].statexml.tag == '{http://andyet.net/protocol/pubsubjob}unclaimed':
 					event = self.itemevent_class(self.name, self.items[nitem_id])
 					#self.xmpp.schedule("%s::%s::bcast" % (self.name, nitem_id), 0, self.notifyItem, (event,))
 					self.notifyItem(event)
-					sent += 1
-					if sent > 2:
-						break
 		elif passed and state.tag == "{http://andyet.net/protocol/pubsubjob}finished":
+			self.deleteItem(item_id)
+			if not len(self.itemorder):
+				self.current_event = None
+		elif passed and state.tag == "{http://andyet.net/protocol/pubsubjob}unclaimed":
+			self.items[item_id].cancel_counter += 1
+			if self.items[item_id].cancel_counter >= 3:
+				logging.error("Placing job in purgatory")
+				#TODO: actually do that
 			self.deleteItem(item_id)
 			if not len(self.itemorder):
 				self.current_event = None
