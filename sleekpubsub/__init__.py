@@ -7,7 +7,7 @@ from sleekxmpp.exceptions import XMPPError
 from xml.etree import cElementTree as ET
 import uuid
 from . db import PubsubDB
-from . node import BaseNode, CollectionNode, QueueNode, JobNode
+from . node import BaseNode, CollectionNode, QueueNode, JobNode2
 import logging
 from . adhoc import PubsubAdhoc
 from . httpd import HTTPD
@@ -96,7 +96,7 @@ class PublishSubscribe(object):
 		self.default_config = self.getDefaultConfig()
 		
 		self.admins = []
-		self.node_classes = {'leaf': BaseNode, 'collection': CollectionNode, 'queue': QueueNode, 'job': JobNode}
+		self.node_classes = {'leaf': BaseNode, 'collection': CollectionNode, 'queue': QueueNode, 'job': JobNode2}
 		self.nodes = NodeCache(self)
 		self.adhoc = PubsubAdhoc(self)
 		self.http = HTTPD(self)
@@ -108,6 +108,7 @@ class PublishSubscribe(object):
 		self.xmpp.registerHandler(Callback('pubsub create', StanzaPath("iq@type=set/pubsub/create"), self.handleCreateNode)) 
 		self.xmpp.registerHandler(Callback('pubsub configure', StanzaPath("iq@type=set/pubsub_owner/configure"), self.handleConfigureNode))
 		self.xmpp.registerHandler(Callback('pubsub delete', StanzaPath('iq@type=set/pubsub_owner/delete'), self.handleDeleteNode))
+		self.xmpp.registerHandler(Callback('pubsub getitems', StanzaPath('iq@type=get/pubsub/items'), self.handleGetItems))
 
 		#self.xmpp.registerHandler(Callback('pubsub configure', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub#owner'><configure xmlns='http://jabber.org/protocol/pubsub#owner' /></pubsub></iq>" % self.xmpp.default_ns), self.handleConfigureNode)) 
 		self.xmpp.registerHandler(Callback('pubsub get configure', MatchXMLMask("<iq xmlns='%s' type='get'><pubsub xmlns='http://jabber.org/protocol/pubsub#owner'><configure xmlns='http://jabber.org/protocol/pubsub#owner' /></pubsub></iq>" % self.xmpp.default_ns), self.handleGetNodeConfig)) 
@@ -244,6 +245,24 @@ class PublishSubscribe(object):
 		else:
 			return False
 	
+	def handleGetItems(self, iq):
+		node = self.nodes.get(iq['pubsub']['items']['node'])
+		if node is None:
+			raise XMPPError('item-not-found')
+		item_insts = node.getItems()
+		if len(item_insts) == 0 or item_insts is None:
+			raise XMPPError('item-not-found')
+		for item_inst in item_insts:
+			item = Pubsub.Item()
+			item['payload'] = item_inst.payload
+			item['id'] = item_inst.name
+			iq['pubsub']['items'].append(item)
+		iq.reply()
+		iq['pubsub']['items']['node'] = node.name
+		iq['type'] = 'result'
+		iq.send()
+
+
 	def handlePublish(self, stanza):
 		"""iq/{http://jabber.org/protocol/pubsub}pubsub/{http://jabber.org/protocol/pubsub}publish"""
 		node = self.nodes.get(stanza['pubsub']['publish']['node'])

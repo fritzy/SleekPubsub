@@ -9,6 +9,7 @@ import pickle
 import time
 import random
 import copy
+import sleekxmpp.plugins.stanza_pubsub as pubsub
 
 class StateMachine(object):
 	def __init__(self, resource, ns):
@@ -699,3 +700,54 @@ class JobNode(QueueNode):
 				self.current_event = None
 		return passed
 
+class JobNode2(QueueNode):
+	default_config = copy.copy(BaseNode.default_config)
+	default_config.addField('queue#wait', label='Seconds to wait for subscribers to claim', value='4')
+	item_class = JobQueueItem
+	itemevent_class = ItemEvent
+
+	def __init__(self, *args, **kwargs):
+		BaseNode.__init__(self, *args, **kwargs)
+		self.xmpp.schedule("%s::node_maintenance" % (self.name,),  5, self.maintenance, repeat=True)
+		self.last_update_time = None
+		self.last_update_size = 0
+
+	def setItemState(self, item_id, state, who=None):
+		passed = BaseNode.setItemState(self, item_id, state, who)
+		if passed and state.tag == "{http://andyet.net/protocol/pubsubjob}finished":
+			self.deleteItem(item_id)
+			self.notifyItem(None)
+		elif passed and state.tag == "{http://andyet.net/protocol/pubsubjob}unclaimed":
+			self.notifyItem(None)
+		return passed
+
+	def getSize(self):
+		count = 0
+		for item_id in self.items:
+			item = self.items[item_id]
+			#print "state of %s::%s = %s" % (self.name, item_id, item.state['http://andyet.net/protocol/pubsubjob'].getState())
+			if item.state['http://andyet.net/protocol/pubsubjob'].getState() in (None, "{http://andyet.net/protocol/pubsubjob}unclaimed"):
+				count += 1
+		return count
+	
+	def notifyItem(self, event):
+		msg = self.xmpp.Message()
+		item = pubsub.EventItem()
+		item['id'] = uuid.uuid4().hex
+		pl = ET.Element('{http://andyet.net/protocol/pubsubjob}queuestatus',{'size': "%s" % self.getSize()})
+		item['payload'] = pl
+		msg['pubsub_event']['items'].append(item)
+		msg['pubsub_event']['node'] = self.name
+		for mfrom, mto in self.eachSubscriber():
+			msg.send()
+	
+	def getItems(self, max=0):
+		item = []
+		for item_id in self.itemorder:
+			if self.items[item_id].state['http://andyet.net/protocol/pubsubjob'].getState() in (None, "{http://andyet.net/protocol/pubsubjob}unclaimed"):
+				item.append(self.items[item_id])
+				break
+		return item
+
+	def maintenance(self):
+		pass
