@@ -743,8 +743,10 @@ class JobNode2(QueueNode):
 	
 	def getItems(self, max=0):
 		item = []
+		state = ET.Element('{http://andyet.net/protocol/pubsubjob}claimed')
 		for item_id in self.itemorder:
-			if self.items[item_id].state['http://andyet.net/protocol/pubsubjob'].getState() in (None, "{http://andyet.net/protocol/pubsubjob}unclaimed"):
+			#if self.items[item_id].state['http://andyet.net/protocol/pubsubjob'].getState() in (None, "{http://andyet.net/protocol/pubsubjob}unclaimed"):
+			if self.setItemState(item_id, state):
 				item.append(self.items[item_id])
 				break
 		return item
