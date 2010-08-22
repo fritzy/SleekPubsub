@@ -277,7 +277,7 @@ class PublishSubscribe(object):
 		if node is None:
 			stanza.reply()
 			stanza['error']['condition'] = 'item-not-found'
-			iq.send()
+			stanza.send()
 			return
 		for item in stanza['pubsub']['publish']:
 			item_id = self.publish(stanza['pubsub']['publish']['node'], item['payload'], item['id'], stanza['from'].bare)
