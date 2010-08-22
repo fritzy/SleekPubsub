@@ -181,6 +181,7 @@ class PublishSubscribe(object):
 		default_config.addField('pubsub#notify_retract', 'boolean', label='Notify subscribers when items are removed from the node', value=False)
 		default_config.addField('pubsub#notify_sub', 'boolean', label='Notify owners about new subscribers and unsubscribes', value=False)
 		default_config.addField('pubsub#persist_items', 'boolean', label='Persist items in storage', value=False)
+		default_config.addField('pubsub#expire', label='Expire')
 		default_config.addField('pubsub#max_items', label='Max # of items to persist', value='10')
 		default_config.addField('pubsub#subscribe', 'boolean', label='Whether to allow subscriptions', value=True)
 		default_config.addField('pubsub#collection', 'text-multi', label="This node in collections")
@@ -273,7 +274,10 @@ class PublishSubscribe(object):
 				iq['psstate']['payload'] = payload
 				iq.send()
 			else:
-				raise XMPPError('not-allowed')
+				iq.reply()
+				iq['error']['condition'] = 'not-allowed'
+				iq.send()
+				#raise XMPPError('not-allowed')
 	
 	def publish(self, node, item, id=None, who=None):
 		if isinstance(node, str):
@@ -289,7 +293,8 @@ class PublishSubscribe(object):
 		if config is None:
 			config = copy.copy(self.default_config)
 			for option in self.config.options('defaultnodeconfig'):
-				config.setValues({option: self.config.get('defaultnodeconfig', option)})
+				config.field[option].setValue(self.config.get('defaultnodeconfig', option))
+				#config.setValues({option: self.config.get('defaultnodeconfig', option)})
 		else:
 			config = self.default_config.merge(config)
 		config = config.getValues()
@@ -303,7 +308,7 @@ class PublishSubscribe(object):
 	
 	def handleCreateNode(self, iq):
 		node = iq['pubsub']['create']['node'] or uuid.uuid4().hex
-		config = iq['pubsub']['configure']['config'] or self.default_config
+		config = iq['pubsub']['configure']['form'] or self.default_config
 		if node in self.nodes:
 			raise XMPPError('conflict', etype='cancel')
 		if not self.createNode(node, config, iq['from'].full):
@@ -333,30 +338,27 @@ class PublishSubscribe(object):
 		self.xmpp.send(iq)
 	
 	def subscribeNode(self, node, jid, who=None, to=None):
-		print "subscribing..."
 		if node not in self.nodes:
 			if self.config.get('settings', 'node_creation') == 'createonsubscribe':
-				self.createNode(node, config=None, who=who)
+				self.createNode(node, config=None, who=who.full)
 			else:
-				print "node not found and not createonsubscribe"
 				return False
 		if self.nodes[node].config.get('pubsub#expire') == 'presence':
-			if not self.xmpp.roster.has_key(who):
-				"tried to create the node, but the user isn't in the roster"
+			if not self.xmpp.roster.has_key(who.bare) and self.xmpp.roster[who.bare].has_key(who.resource):
 				return False
 			else:
 				if who not in self.presence_expire:
 					self.presence_expire[who] = []
 				self.presence_expire[who].append(node)
-		print "calling node subscribe"
-		return self.nodes[node].subscribe(jid, who, to=to)
+		return self.nodes[node].subscribe(jid, who.full, to=to)
 	
 	def handleSubscribe(self, stanza):
 		node = stanza['pubsub']['subscribe']['node']
 		jid = stanza['pubsub']['subscribe']['jid'].full
-		subid = self.subscribeNode(node, jid, stanza['from'].full)
+		subid = self.subscribeNode(node, jid, stanza['from'])
 		if not subid:
-			self.xmpp.send(self.xmpp.makeIqError(stanza['id']))
+			raise XMPPError('not-allowed')
+			#self.xmpp.send(self.xmpp.makeIqError(stanza['id']))
 			return
 		stanza.reply()
 		stanza.clear()
