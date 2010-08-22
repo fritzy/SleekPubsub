@@ -56,6 +56,7 @@ class NodeCache(object):
 				self[node].save()
 	
 	def addNode(self, name, klass, node=None):
+		print "Loading %s as %s" % (node, klass)
 		self.allnodes[name] = klass
 		if isinstance(node, BaseNode):
 			self.cache.append(name)
@@ -248,16 +249,22 @@ class PublishSubscribe(object):
 	def handleGetItems(self, iq):
 		node = self.nodes.get(iq['pubsub']['items']['node'])
 		if node is None:
-			raise XMPPError('item-not-found')
-		item_insts = node.getItems()
+			iq.reply()
+			iq['error']['condition'] = 'item-not-found'
+			iq.send()
+			return
+		item_insts = node.getItems(who=iq['from'])
 		if len(item_insts) == 0 or item_insts is None:
-			raise XMPPError('item-not-found')
+			iq.reply()
+			iq['error']['condition'] = 'item-not-found'
+			iq.send()
+			return
+		iq.reply()
 		for item_inst in item_insts:
 			item = Pubsub.Item()
 			item['payload'] = item_inst.payload
 			item['id'] = item_inst.name
 			iq['pubsub']['items'].append(item)
-		iq.reply()
 		iq['pubsub']['items']['node'] = node.name
 		iq['type'] = 'result'
 		iq.send()
@@ -268,7 +275,10 @@ class PublishSubscribe(object):
 		node = self.nodes.get(stanza['pubsub']['publish']['node'])
 		ids = []
 		if node is None:
-			raise XMPPError('item-not-found')
+			stanza.reply()
+			stanza['error']['condition'] = 'item-not-found'
+			iq.send()
+			return
 		for item in stanza['pubsub']['publish']:
 			item_id = self.publish(stanza['pubsub']['publish']['node'], item['payload'], item['id'], stanza['from'].bare)
 			ids.append(item_id)

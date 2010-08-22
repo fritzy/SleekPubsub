@@ -731,22 +731,30 @@ class JobNode2(QueueNode):
 		return count
 	
 	def notifyItem(self, event):
-		msg = self.xmpp.Message()
-		item = pubsub.EventItem()
-		item['id'] = uuid.uuid4().hex
-		pl = ET.Element('{http://andyet.net/protocol/pubsubjob}queuestatus',{'size': "%s" % self.getSize()})
-		item['payload'] = pl
-		msg['pubsub_event']['items'].append(item)
-		msg['pubsub_event']['node'] = self.name
-		for mfrom, mto in self.eachSubscriber():
-			msg.send()
+		size = self.getSize()
+		if size == 0 or self.last_update_size == 0 or self.last_update_time is None or time.time() - self.last_update_time > 3.0:
+		#if (self.last_update_size == 0 and size != 0) or (self.last_update_size != 0 and size == 0) or self.last_update_time is None or (time.time() - self.last_update_time) > 3.0:
+			self.last_update_time = time.time()
+			self.last_update_size = size
+			msg = self.xmpp.Message()
+			item = pubsub.EventItem()
+			item['id'] = uuid.uuid4().hex
+			pl = ET.Element('{http://andyet.net/protocol/pubsubjob}queuestatus',{'size': "%s" % size})
+			item['payload'] = pl
+			msg['pubsub_event']['items'].append(item)
+			msg['pubsub_event']['items']['node'] = self.name
+			for step in self.eachSubscriber():
+				for mto, mfrom in step:
+					msg['from'] = mfrom or self.xmpp.jid
+					msg['to'] = mto
+					msg.send()
 	
-	def getItems(self, max=0):
+	def getItems(self, max=0, who=None):
 		item = []
 		state = ET.Element('{http://andyet.net/protocol/pubsubjob}claimed')
 		for item_id in self.itemorder:
 			#if self.items[item_id].state['http://andyet.net/protocol/pubsubjob'].getState() in (None, "{http://andyet.net/protocol/pubsubjob}unclaimed"):
-			if self.setItemState(item_id, state):
+			if self.setItemState(item_id, state, who=who):
 				item.append(self.items[item_id])
 				break
 		return item
