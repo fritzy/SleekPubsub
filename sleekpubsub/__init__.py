@@ -32,7 +32,7 @@ class NodeCache(object):
 		return self.activenodes[key]
 
 	def __contains__(self, key):
-		logging.debug("searching %s for %s" % (self.allnodes, key))
+		#logging.debug("searching %s for %s" % (self.allnodes, key))
 		return key in self.allnodes
 
 	def get(self, key, default=None):

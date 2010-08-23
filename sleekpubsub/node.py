@@ -279,6 +279,10 @@ class BaseNode(object):
 			self.affiliations['owner'].append(self.new_owner)
 		self.dbLoad()
 		self.lastsaved = time.time()
+
+		self.updates_per_second = 0.0
+		self.recent_updates = 0
+		self.recent_update_time = time.time()
 	
 	def dbLoad(self):
 		if self.pubsub.config.get('settings', 'node_creation') == 'createonsubscribe':
@@ -322,6 +326,7 @@ class BaseNode(object):
 		return self.affiliations
 	
 	def notifyItemState(self, xml, item_id=None, who=None):
+		return
 		msg = self.xmpp.Message()
 		msg['psstate_event']['psstate']['node'] = self.name
 		msg['psstate_event']['psstate']['item'] = item_id
@@ -422,6 +427,12 @@ class BaseNode(object):
 					idx += 1
 	
 	def publish(self, item, item_id=None, options=None, who=None):
+		self.recent_updates += 1
+		spent = time.time() - self.recent_update_time 
+		if spent >= 10.0:
+			self.updates_per_second = float(self.recent_updates) / spent
+			self.recent_update_time = time.time()
+			self.recent_updates = 1
 		if not item_id:
 			item_id = uuid.uuid4().hex
 		self.xmpp.schedule("%s::%s::publish" % (self.name, item_id), 0, self._publish, (item,item_id, options, who))
@@ -722,6 +733,7 @@ class JobNode2(QueueNode):
 		return passed
 
 	def getSize(self):
+		return len(self.items)
 		count = 0
 		for item_id in self.items:
 			item = self.items[item_id]
@@ -739,7 +751,7 @@ class JobNode2(QueueNode):
 			msg = self.xmpp.Message()
 			item = pubsub.EventItem()
 			item['id'] = uuid.uuid4().hex
-			pl = ET.Element('{http://andyet.net/protocol/pubsubjob}queuestatus',{'size': "%s" % size})
+			pl = ET.Element('{http://andyet.net/protocol/pubsubjob}queuestatus',{'size': "%s" % size, 'per_sec': "%s" % self.updates_per_second})
 			item['payload'] = pl
 			msg['pubsub_event']['items'].append(item)
 			msg['pubsub_event']['items']['node'] = self.name
