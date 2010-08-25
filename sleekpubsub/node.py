@@ -733,7 +733,7 @@ class JobNode2(QueueNode):
 		return passed
 
 	def getSize(self):
-		return len(self.items)
+		#return len(self.items)
 		count = 0
 		for item_id in self.items:
 			item = self.items[item_id]
