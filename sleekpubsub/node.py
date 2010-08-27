@@ -254,8 +254,9 @@ class BaseNode(object):
 	item_class = Item
 	itemevent_class = ItemEvent
 
-	def __init__(self, pubsub, db, name, config=None, owner=None, fresh=False):
+	def __init__(self, pubsub, db, name, config=None, owner=None, fresh=False, use_db=True):
 		self.new_owner = owner
+		self.use_db = use_db
 		self.fresh = fresh
 		self.pubsub = pubsub
 		self.xmpp = self.pubsub.xmpp
@@ -279,13 +280,15 @@ class BaseNode(object):
 			self.affiliations['owner'].append(self.new_owner)
 		self.dbLoad()
 		self.lastsaved = time.time()
+		if self.pubsub.config.get('settings', 'node_creation') == 'createonsubscribe':
+			use_db = False
 
 		self.updates_per_second = 0.0
 		self.recent_updates = 0
 		self.recent_update_time = time.time()
 	
 	def dbLoad(self):
-		if self.pubsub.config.get('settings', 'node_creation') == 'createonsubscribe':
+		if not self.use_db:
 			return
 		if not self.fresh:
 			self.affiliations = self.db.getAffiliations(self.name)
@@ -301,7 +304,7 @@ class BaseNode(object):
 			self.db.createNode(self.name, self.config, self.affiliations, self.items)
 
 	def dbDump(self, save=False):
-		if self.pubsub.config.get('settings', 'node_creation') == 'createonsubscribe':
+		if not self.use_db:
 			return
 		if save:
 			self.db.synch(self.name, pickle.dumps(self.config), self.affiliations, self.items, subscriptions=self.subscriptions)
@@ -310,7 +313,7 @@ class BaseNode(object):
 		self.lastsaved = time.time()
 
 	def save(self):
-		if self.pubsub.config.get('settings', 'node_creation') == 'createonsubscribe':
+		if not self.use_db:
 			return
 		logging.info("Saving %s" % self.name)
 		#self.dbDump(True)
@@ -365,7 +368,7 @@ class BaseNode(object):
 				config = ET.tostring(config.getXML('submit'))
 			self.subscriptions[subid] = Subscription(self, jid, subid, config, to)
 			self.subscriptionsbyjid[jid] = self.subscriptions[subid]
-			if self.config['sleek#saveonchange'] and self.pubsub.config.get('settings', 'node_creation') != 'createonsubscribe':
+			if self.config['sleek#saveonchange'] and self.use_db:
 				self.db.addSubscription(self.name, jid, subid, config, to)
 			return subid
 		else:
@@ -375,7 +378,7 @@ class BaseNode(object):
 	def unsubscribe(self, jid, who=None, subid=None):
 		if subid is None:
 			subid = self.subscriptionsbyjid[jid].getid()
-		if self.config['sleek#saveonchange'] and self.pubsub.config.get('settings', 'node_creation') != 'createonsubscribe':
+		if self.config['sleek#saveonchange'] and self.use_db:
 			self.db.deleteSubscription(self.name, jid, subid)
 		try:
 			del self.subscriptions[subid]
@@ -445,7 +448,7 @@ class BaseNode(object):
 			payload = item
 		item_inst = self.item_class(self, item_id, who, payload, options)
 		if self.config.get('pubsub#persist_items', False):
-			if self.config['sleek#saveonchange'] and self.pubsub.config.get('settings', 'node_creation') != 'createonsubscribe':
+			if self.config['sleek#saveonchange'] and self.use_db:
 				self.db.setItem(self.name, item_id, payload)
 			self.items[item_id] = item_inst
 			if item_id not in self.itemorder:
@@ -492,7 +495,7 @@ class BaseNode(object):
 			raise XMPPError() #TODO make this the right error
 		self.config.update(config)
 		# we do this regardless of cache settings
-		if self.pubsub.config.get('settings', 'node_creation') != 'createonsubscribe':
+		if self.use_db:
 			self.db.synch(self.name, config=pickle.dumps(self.config))
 	
 	def setState(self, state, who):
@@ -526,7 +529,7 @@ class BaseNode(object):
 			if key not in self.affiliationtypes:
 				return False
 		self.affiliations.update(affiliations)
-		if self.config['sleek#saveonchange'] and self.pubsub.config.get('settings', 'node_creation') != 'createonsubscribe':
+		if self.config['sleek#saveonchange'] and self.use_db:
 			self.db.synch(self.name, affiliations=self.affiliations)
 		return True
 	
@@ -761,14 +764,18 @@ class JobNode2(QueueNode):
 					msg['to'] = mto
 					msg.send()
 	
-	def getItems(self, max=0, who=None):
+	def getItems(self, max=5, who=None):
 		item = []
 		state = ET.Element('{http://andyet.net/protocol/pubsubjob}claimed')
+		count = 0
 		for item_id in self.itemorder:
 			#if self.items[item_id].state['http://andyet.net/protocol/pubsubjob'].getState() in (None, "{http://andyet.net/protocol/pubsubjob}unclaimed"):
 			if self.setItemState(item_id, state, who=who):
 				item.append(self.items[item_id])
-				break
+				count += 1
+				if count >= max:
+					break
+		print "sent %d" % count
 		return item
 
 	def maintenance(self):

@@ -12,6 +12,7 @@ import logging
 from . adhoc import PubsubAdhoc
 from . httpd import HTTPD
 import copy
+import os
 
 class NodeCache(object):
 	"""Manages nodes in memory, keeping most recently accessed in memory"""
@@ -73,7 +74,8 @@ class NodeCache(object):
 	def clearExtra(self):
 		while len(self.cache) > self.limit:
 			for node in self.cache[:self.clearbatch]:
-				self.clear(node)
+				if node.use_db:
+					self.clear(node)
 	
 	def clearAll(self):
 		for node in self.cache:
@@ -101,6 +103,10 @@ class PublishSubscribe(object):
 		self.nodes = NodeCache(self)
 		self.adhoc = PubsubAdhoc(self)
 		self.http = HTTPD(self)
+
+
+			
+
 		self.presence_expire = {}
 
 		#self.xmpp.registerHandler(Callback('pubsub publish', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub'><publish xmlns='http://jabber.org/protocol/pubsub' /></pubsub></iq>" % self.xmpp.default_ns), self.handlePublish)) 
@@ -124,6 +130,10 @@ class PublishSubscribe(object):
 	def start(self, event):
 		self.db = PubsubDB(self.dbfile, self.xmpp)
 		self.loadNodes()
+		self.createNode('__stats__', config={'pubsub#presence_based_delivery': True}, who=None, use_db=False)
+		self.createNode('__purgatory__', config={'pubsub#presence_based_delivery': True}, who=None, use_db=False)
+
+		self.xmpp.schedule('sleekpubsub_generate_stats', 3.0, self.generateStats, repeat=True)
 		for jid, pfrom in self.db.getRoster():
 			if not pfrom: pfrom = self.xmpp.jid
 			self.xmpp.sendPresence(pto=jid, ptype='probe', pfrom=pfrom)
@@ -131,6 +141,24 @@ class PublishSubscribe(object):
 
 	def save(self):
 		self.nodes.saveAll()
+
+	def generateStats(self):
+		uptime = os.popen('uptime')
+		load = " ".join(uptime.read().strip().split(' ')[-3:])
+		uptime.close()
+		stats = ET.Element('{http://andyet.net/protocol/jobs}stats')
+		loadx = ET.Element('{http://andyet.net/protocol/jobs}load')
+		loadx.text = load
+		stats.append(loadx)
+		for node_name in self.nodes.allnodes:
+			if not node_name.startswith("__"):
+				node = self.nodes[node_name]
+				numworkers = 0
+				for jid in node.subscriptionsbyjid:
+					numworkers += len(self.xmpp.roster.get(jid, {'presence':{}})['presence'])
+				stat = ET.Element('{http://andyet.net/protocol/jobs}stat', {'node': node_name, 'update_rate': "%.2f" % node.updates_per_second, 'size': "%d" % len(node.items), 'max_size': "%s" % node.config.get('pubsub#max_items', '0'), 'workers': "%d" % numworkers})
+				stats.append(stat)
+		self.publish('__stats__', stats)
 
 	def handleGotOnline(self, pres):
 		pfrom = pres['to'].user
@@ -318,7 +346,7 @@ class PublishSubscribe(object):
 		stanza['pubsub_owner']['default']['config'] = self.node_classes.get(stanza['pubsub_owner']['default']['type'], BaseNode).default_config
 		stanza.send()
 	
-	def createNode(self, node, config=None, who=None):
+	def createNode(self, node, config=None, who=None, use_db=True):
 		if config is None:
 			config = copy.copy(self.default_config)
 			for option in self.config.options('defaultnodeconfig'):
@@ -332,7 +360,7 @@ class PublishSubscribe(object):
 			return False
 		if who:
 			who = self.xmpp.getjidbare(who)
-		self.nodes.addNode(node, nodeclass, nodeclass(self, self.db, node, config, owner=who, fresh=True))
+		self.nodes.addNode(node, nodeclass, nodeclass(self, self.db, node, config, owner=who, fresh=True, use_db=use_db))
 		return True
 	
 	def handleCreateNode(self, iq):
