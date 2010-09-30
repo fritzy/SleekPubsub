@@ -100,10 +100,13 @@ class Event(object):
 class ItemEvent(Event):
 	def __init__(self, name, item):
 		Event.__init__(self, name)
-		self.item = item
+		self.item = [item]
 	
 	def getItem(self):
-		return item
+		return item[0]
+	
+	def addItem(self, item):
+		self.item.append(item)
 
 class QueueItemEvent(ItemEvent):
 	def __init__(self, name, item, bcast=None, rotation=0):
@@ -232,6 +235,7 @@ class BaseNode(object):
 	default_config.addField('pubsub#notify_sub', 'boolean', label='Notify owners about new subscribers and unsubscribes', value=False)
 	default_config.addField('pubsub#persist_items', 'boolean', label='Persist items in storage', value=False)
 	default_config.addField('pubsub#max_items', label='Max # of items to persist', value='100')
+	default_config.addField('pubsub#expire', label='Expire')
 	default_config.addField('pubsub#subscribe', 'boolean', label='Whether to allow subscriptions', value=True)
 	default_config.addField('pubsub#collection', 'text-multi', label="This node in collections")
 	default_config.addField('sleek#saveonchange', 'boolean', label='Save on every change', value=False)
@@ -246,7 +250,7 @@ class BaseNode(object):
 	model = default_config.addField('pubsub#send_last_published_item', 'list-single', label='Send last published item', value='never')
 	model.addOption('never', 'Never')
 	model.addOption('on_sub', 'On Subscription')
-	model.addOption('on_sun_and_presence', 'On Subscription And Presence')
+	model.addOption('on_sub_and_presence', 'On Subscription And Presence')
 	default_config.addField('pubsub#presence_based_delivery', 'boolean', label='Deliver notification only to available users', value=False)
 	del ntype
 	del model
@@ -370,6 +374,13 @@ class BaseNode(object):
 			self.subscriptionsbyjid[jid] = self.subscriptions[subid]
 			if self.config['sleek#saveonchange'] and self.use_db:
 				self.db.addSubscription(self.name, jid, subid, config, to)
+			if self.config['pubsub#send_last_published_item'] in ('on_sub', 'on_sub_and_presence'):
+				if len(self.itemorder) > 0:
+					event = ItemEvent(self.name, self.items[self.itemorder[0]])
+					if len(self.itemorder) > 1:
+						for item in self.itemorder[1:]:
+							event.addItem(self.items[item])
+					self.notifyItem(event, jid)
 			return subid
 		else:
 			return False
@@ -402,7 +413,7 @@ class BaseNode(object):
 	def getLastItem(self, node):
 		pass
 	
-	def eachSubscriber(self, step=1):
+	def eachSubscriber(self, step=1, filterjid=None):
 		"Generator for subscribers."
 		if step < 1:
 			raise ValueError
@@ -413,21 +424,22 @@ class BaseNode(object):
 			subscriber = self.subscriptions[subid]
 			jid = subscriber.getjid()
 			mto = subscriber.getto()
-			if '/' in jid or not self.config.get('pubsub#presence_based_delivery', False):
-					result.append((jid, mto))
-					if idx % step == 0:
-						yield result
-						result = []
-					idx += 1
-			else:
-				resources = self.xmpp.roster.get(jid, {'presence': {}})['presence'].keys()
-				random.shuffle(resources)
-				for resource in resources:
-					result.append(("%s/%s" % (jid, resource), mto))
-					if idx % step == 0:
-						yield result
-						result = []
-					idx += 1
+			if not (filterjid is not None and (filterjid != jid)):
+				if '/' in jid or not self.config.get('pubsub#presence_based_delivery', False):
+						result.append((jid, mto))
+						if idx % step == 0:
+							yield result
+							result = []
+						idx += 1
+				else:
+					resources = self.xmpp.roster.get(jid, {'presence': {}})['presence'].keys()
+					random.shuffle(resources)
+					for resource in resources:
+						result.append(("%s/%s" % (jid, resource), mto))
+						if idx % step == 0:
+							yield result
+							result = []
+						idx += 1
 	
 	def publish(self, item, item_id=None, options=None, who=None):
 		self.recent_updates += 1
@@ -538,27 +550,57 @@ class BaseNode(object):
 			return False
 		return self.affiliations
 	
-	def notifyItem(self, event):
+	def notifyItem(self, event, filterjid=None):
 		if event.hasNode(self.name):
 			return False
 		event.addNode(self.name)
-		item_id = event.item.name
-		payload = event.item.payload
 		jid=''
 		msg = self.xmpp.Message()
 		msg['to'] = jid
 		msg['from'] = self.xmpp.jid
 		xevent = ET.Element('{http://jabber.org/protocol/pubsub#event}event')
 		items = ET.Element('items', {'node': event.originalnode})
-		item = ET.Element('item', {'id': item_id})
-		item.append(payload)
-		items.append(item)
+		for itemi in event.item:
+			item_id = itemi.name
+			payload = itemi.payload
+			item = ET.Element('item', {'id': item_id})
+			item.append(payload)
+			items.append(item)
 		xevent.append(items)
 		if payload.tag == '{jabber:client}body':
 			msg['body'] = payload.text
 			msg['type'] = 'chat'
 		else:
 			msg.append(xevent)
+		for toset in self.eachSubscriber(filterjid=filterjid): 
+			jid, mto = toset[0]
+			if not event.hasJid(jid):
+				event.addJid(jid)
+				msg['to'] = jid
+				msg['from'] = mto or self.xmpp.jid
+				self.xmpp.send(msg)
+		for parent in self.collections:
+			if parent in self.pubsub.nodes:
+				self.pubsub.nodes[parent].notifyItem(event, jid)
+	
+	def notifyConfig(self):
+		pass
+	
+	def notifyDelete(self, event):
+		if event.hasNode(self.name):
+			return False
+		event.addNode(self.name)
+		jid=''
+		msg = self.xmpp.Message()
+		msg['to'] = jid
+		msg['from'] = self.xmpp.jid
+		xevent = ET.Element('{http://jabber.org/protocol/pubsub#event}event')
+		items = ET.Element('items', {'node': event.originalnode})
+		item = ET.Element('retract', {'id': event.item[0].name})
+		#item.append(payload)
+		items.append(item)
+		xevent.append(items)
+		msg.append(xevent)
 		for toset in self.eachSubscriber(): 
 			jid, mto = toset[0]
 			if not event.hasJid(jid):
@@ -568,13 +610,7 @@ class BaseNode(object):
 				self.xmpp.send(msg)
 		for parent in self.collections:
 			if parent in self.pubsub.nodes:
-				self.pubsub.nodes[parent].notifyItem(event)
-	
-	def notifyConfig(self):
-		pass
-	
-	def notifyDelete(self, event):
-		pass
+				self.pubsub.nodes[parent].notifyDelete(event)
 
 	def delete(self):
 		for sub in self.subscriptions.keys():

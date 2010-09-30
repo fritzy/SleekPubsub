@@ -104,9 +104,6 @@ class PublishSubscribe(object):
 		self.adhoc = PubsubAdhoc(self)
 		self.http = HTTPD(self)
 
-
-			
-
 		self.presence_expire = {}
 
 		#self.xmpp.registerHandler(Callback('pubsub publish', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub'><publish xmlns='http://jabber.org/protocol/pubsub' /></pubsub></iq>" % self.xmpp.default_ns), self.handlePublish)) 
@@ -116,6 +113,7 @@ class PublishSubscribe(object):
 		self.xmpp.registerHandler(Callback('pubsub configure', StanzaPath("iq@type=set/pubsub_owner/configure"), self.handleConfigureNode))
 		self.xmpp.registerHandler(Callback('pubsub delete', StanzaPath('iq@type=set/pubsub_owner/delete'), self.handleDeleteNode))
 		self.xmpp.registerHandler(Callback('pubsub getitems', StanzaPath('iq@type=get/pubsub/items'), self.handleGetItems))
+		self.xmpp.registerHandler(Callback('pubsub delete item', StanzaPath('iq@type=set/pubsub/retract'), self.handleRetractItem))
 
 		#self.xmpp.registerHandler(Callback('pubsub configure', MatchXMLMask("<iq xmlns='%s' type='set'><pubsub xmlns='http://jabber.org/protocol/pubsub#owner'><configure xmlns='http://jabber.org/protocol/pubsub#owner' /></pubsub></iq>" % self.xmpp.default_ns), self.handleConfigureNode)) 
 		self.xmpp.registerHandler(Callback('pubsub get configure', MatchXMLMask("<iq xmlns='%s' type='get'><pubsub xmlns='http://jabber.org/protocol/pubsub#owner'><configure xmlns='http://jabber.org/protocol/pubsub#owner' /></pubsub></iq>" % self.xmpp.default_ns), self.handleGetNodeConfig)) 
@@ -167,13 +165,19 @@ class PublishSubscribe(object):
 		self.xmpp.sendPresence(pto=pres['from'].bare, pfrom=pfrom)
 
 	def handleGotOffline(self, pres):
-		if not self.xmpp.roster.has_key(pres['from'].bare):
-			for node in self.presence_expire.get(pres['from'].bare, {}):
-				if node in self.nodes:
-					subid = self.nodes.subscriptionsbyjid.get(pres['from'].bare)
-					if subid is not None: subid = subid.subid
-					self.unsubscribeNode(node, pres['from'].jid, subid)
-					logging.debug("Unsubscribing %s from %s because they went offline" % (pres['from'], node))
+		print "--- we got an unavailable notice from", pres['from'].full
+		print self.presence_expire.get(pres['from'].full, [])
+		for node in copy.copy(self.presence_expire.get(pres['from'].full, [])):
+			print "***--**--- Attempting to unsubscribe from", node
+			if node in self.nodes:
+				print "***--**--- Really Attempting to unsubscribe from", node
+				#subid = self.nodes[node].subscriptionsbyjid.get(pres['from'].full)
+				#if subid is not None: subid = subid.subid
+				r = self.unsubscribeNode(node, pres['from'].full)
+				logging.debug("Unsubscribing %s from %s because they went offline: %s" % (pres['from'], node, r))
+		if self.presence_expire.has_key(pres['from'].full) and not self.presence_expire[pres['from'].full]:
+			print "jid is empty, remove presence_expire entry"
+			del  self.presence_expire[pres['from'].full]
 	
 	def handlePresenceSubscribe(self, pres):
 		ifrom = pres['from'].bare
@@ -255,7 +259,9 @@ class PublishSubscribe(object):
 	
 	def handleDeleteNode(self, stanza):
 		if self.deleteNode(stanza['pubsub_owner']['delete']['node']):
-			stanza.reply().send()
+			stanza.reply()
+			stanza['pubsub_owner']['delete']
+			stanza.send()
 		else:
 			stanza.reply()
 			stanza['pubsub_owner']['delete']['node'] = 'somenode'
@@ -295,6 +301,21 @@ class PublishSubscribe(object):
 			iq['pubsub']['items'].append(item)
 		iq['pubsub']['items']['node'] = node.name
 		iq['type'] = 'result'
+		iq.send()
+	
+	def handleRetractItem(self, iq):
+		print "------------------------------------ RETRACT----------"
+		print iq.getStanzaValues()
+		print "--=-=--=-=-=-=-=-=-=-=-==-=-=-=-=-="
+		node = self.nodes.get(iq['pubsub']['retract']['node'])
+		if node is None:
+			iq.reply()
+			iq['error']['condition'] = 'item-not-found'
+			iq.send()
+			return
+		for item in iq['pubsub']['retract']:
+			node.deleteItem(item['id'])
+		iq.reply()
 		iq.send()
 
 
@@ -401,17 +422,19 @@ class PublishSubscribe(object):
 			else:
 				return False
 		if self.nodes[node].config.get('pubsub#expire') == 'presence':
-			if not self.xmpp.roster.has_key(who.bare) and self.xmpp.roster[who.bare].has_key(who.resource):
+			if not self.xmpp.roster.has_key(jid.bare) or not self.xmpp.roster[jid.bare]['presence'].has_key(jid.resource):
+				print "could not subscribe to pubsub#expire", jid.full, self.xmpp.roster
 				return False
 			else:
-				if who not in self.presence_expire:
-					self.presence_expire[who] = []
-				self.presence_expire[who].append(node)
-		return self.nodes[node].subscribe(jid, who.full, to=to)
+				if str(jid) not in self.presence_expire:
+					self.presence_expire[str(jid)] = []
+				self.presence_expire[str(jid)].append(node)
+				print self.presence_expire
+		return self.nodes[node].subscribe(jid.full, who.full, to=to)
 	
 	def handleSubscribe(self, stanza):
 		node = stanza['pubsub']['subscribe']['node']
-		jid = stanza['pubsub']['subscribe']['jid'].full
+		jid = stanza['pubsub']['subscribe']['jid']
 		subid = self.subscribeNode(node, jid, stanza['from'])
 		if not subid:
 			raise XMPPError('not-allowed')
@@ -421,7 +444,7 @@ class PublishSubscribe(object):
 		stanza.clear()
 		stanza['pubsub']['subscription']['subid'] = subid
 		stanza['pubsub']['subscription']['node'] = node
-		stanza['pubsub']['subscription']['jid'] = jid
+		stanza['pubsub']['subscription']['jid'] = str(jid)
 		stanza['pubsub']['subscription']['subscription'] = 'subscribed'
 		stanza.send()
 	
@@ -440,12 +463,13 @@ class PublishSubscribe(object):
 		iq.attrib['to'] = xml.get('from')
 		self.xmpp.send(iq)
 	
-	def unsubscribeNode(node, jid, who=None, subid=None):
+	def unsubscribeNode(self, node, jid, who=None, subid=None):
 		if node in self.nodes:
 			self.nodes[node].unsubscribe(jid, who, subid)
 			if self.nodes[node].config.get('pubsub#expire') == 'presence':
-				if who in self.presence_expire and node in self.presence_expire[who]:
-					self.presence_expire[who].pop(self.presence_expire[who].find(node))
+				if jid in self.presence_expire and node in self.presence_expire[jid]:
+					print "------------ unsubscribed", node, jid
+					self.presence_expire[jid].pop(self.presence_expire[jid].index(node))
 			if self.config.get('settings', 'node_creation') == 'createonsubscribe' and not self.nodes[node].subscriptionsbyjid:
 				self.deleteNode(node)
 			return True

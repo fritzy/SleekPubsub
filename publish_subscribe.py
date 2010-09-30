@@ -2,7 +2,7 @@ import os
 import sys
 import sleekxmpp.componentxmpp
 import logging
-#import logging.handlers
+import logging.handlers
 import sleekpubsub
 #import sleekpubsub.jobnode
 
