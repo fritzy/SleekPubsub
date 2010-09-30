@@ -816,3 +816,6 @@ class JobNode2(QueueNode):
 
 	def maintenance(self):
 		pass
+	
+	def notifyDelete(self, event):
+		pass # we don't notify retracts for job nodes
