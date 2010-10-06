@@ -123,7 +123,30 @@ if __name__ == '__main__':
 	xmpp.registerPlugin('xep_0045')
 	xmpp.registerPlugin('xep_0050')
 	xmpp.registerPlugin('xep_0060')
-	pubsub = sleekpubsub.PublishSubscribe(xmpp, config.get('pubsub', 'dbfile'), config)
+
+	#load config
+	settings = {
+			'node_creation': config.get('settings', 'node_creation'),
+			#'addtorosteraddtonode': config.getboolean('settings', 'addtorosteraddtonode'),
+			'eventsfromsubscribedjid': config.getboolean('settings', 'eventsfromsubscribedjid'),
+			'eachjiduserisnode': config.getboolean('settings', 'eachjiduserisnode'),
+			}
+
+	rest = {
+			'enabled': config.getboolean('rest', 'enabled'),
+			'server': config.get('rest', 'server'),
+			'port': config.getint('rest', 'port'),
+			'user': config.get('rest', 'user'),
+			'passwd': config.get('rest', 'passwd'),
+			'userasjid':config.get('rest', 'userasjid'),
+			}
+	
+	
+	overridedefault = {}
+	for option in config.options('defaultnodeconfig'):
+		overridedefault[option] = self.config.get('defaultnodeconfig', option)
+
+	pubsub = sleekpubsub.PublishSubscribe(xmpp, config.get('pubsub', 'dbfile'), settings, rest, overridedefault)
 	#pubsub.registerNodeType(sleekpubsub.jobnode)
 
 	if xmpp.connect():

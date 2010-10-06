@@ -284,8 +284,8 @@ class BaseNode(object):
 			self.affiliations['owner'].append(self.new_owner)
 		self.dbLoad()
 		self.lastsaved = time.time()
-		if self.pubsub.config.get('settings', 'node_creation') == 'createonsubscribe':
-			use_db = False
+		if self.pubsub.config['settings']['node_creation'] == 'createonsubscribe':
+			self.use_db = False
 
 		self.updates_per_second = 0.0
 		self.recent_updates = 0
@@ -714,7 +714,6 @@ class JobNode(QueueNode):
 		self.xmpp.schedule("%s::node_maintenance" % (self.name,),  5, self.maintenance, repeat=True)
 
 	def maintenance(self):
-		print "Node Size %s: %s" % (self.name, len(self.items))
 		for item_id in self.items:
 			item = self.items[item_id]
 			#print "state of %s::%s = %s" % (self.name, item_id, item.state['http://andyet.net/protocol/pubsubjob'].getState())
@@ -811,7 +810,6 @@ class JobNode2(QueueNode):
 				count += 1
 				if count >= max:
 					break
-		print "sent %d" % count
 		return item
 
 	def maintenance(self):

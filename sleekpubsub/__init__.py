@@ -52,7 +52,7 @@ class NodeCache(object):
 		self.clearExtra()
 	
 	def saveAll(self):
-		if self.pubsub.config.get('settings', 'node_creation') != 'createonsubscribe':
+		if self.pubsub.config['settings']['node_creation'] != 'createonsubscribe':
 			for node in self.allnodes:
 				self[node].save()
 	
@@ -82,7 +82,7 @@ class NodeCache(object):
 			self.clear(node)
 	
 	def clear(self, node):
-		if self.pubsub.config.get('settings', 'node_creation') != 'createonsubscribe':
+		if self.pubsub.config['settings']['node_creation'] != 'createonsubscribe':
 			self.activenodes[node].save()
 		del self.activenodes[node]
 		self.cache.pop(self.cache.index(node))
@@ -90,19 +90,26 @@ class NodeCache(object):
 
 class PublishSubscribe(object):
 	
-	def __init__(self, xmpp, dbfile, config):
+	def __init__(self, xmpp, dbfile, settings, rest, overridedefault=None):
+		
 		self.xmpp = xmpp
 		self.dbfile = dbfile
+		self.db = None
 		self.nodeplugins = []
 		
-		self.config = config
+		self.config = {'settings': settings, 'rest': rest}
+		if overridedefault is None:
+			self.config['defaultnodeconfig'] = {}
+		else:
+			self.config['defaultnodecofnig'] = overridedefault
 		self.default_config = self.getDefaultConfig()
 		
 		self.admins = []
 		self.node_classes = {'leaf': BaseNode, 'collection': CollectionNode, 'queue': QueueNode, 'job': JobNode2}
 		self.nodes = NodeCache(self)
 		self.adhoc = PubsubAdhoc(self)
-		self.http = HTTPD(self)
+		if self.config['rest']['enabled']:
+			self.http = HTTPD(self)
 
 		self.presence_expire = {}
 
@@ -126,16 +133,19 @@ class PublishSubscribe(object):
 		self.xmpp.add_event_handler("got_offline", self.handleGotOffline)
 	
 	def start(self, event):
-		self.db = PubsubDB(self.dbfile, self.xmpp)
+		if self.dbfile is not None:
+			self.db = PubsubDB(self.dbfile, self.xmpp)
 		self.loadNodes()
 		self.createNode('__stats__', config={'pubsub#presence_based_delivery': True}, who=None, use_db=False)
 		self.createNode('__purgatory__', config={'pubsub#presence_based_delivery': True}, who=None, use_db=False)
 
 		self.xmpp.schedule('sleekpubsub_generate_stats', 3.0, self.generateStats, repeat=True)
-		for jid, pfrom in self.db.getRoster():
-			if not pfrom: pfrom = self.xmpp.jid
-			self.xmpp.sendPresence(pto=jid, ptype='probe', pfrom=pfrom)
-			self.xmpp.sendPresence(pto=jid, pfrom=pfrom)
+		if self.db is not None:
+			for jid, pfrom in self.db.getRoster():
+				if not pfrom: pfrom = self.xmpp.jid
+				self.xmpp.sendPresence(pto=jid, ptype='probe', pfrom=pfrom)
+				self.xmpp.sendPresence(pto=jid, pfrom=pfrom)
+		self.xmpp.event("sleekpubsub_ready", {})
 
 	def save(self):
 		self.nodes.saveAll()
@@ -165,21 +175,15 @@ class PublishSubscribe(object):
 		self.xmpp.sendPresence(pto=pres['from'].bare, pfrom=pfrom)
 
 	def handleGotOffline(self, pres):
-		print "--- we got an unavailable notice from", pres['from'].full
-		print self.presence_expire.get(pres['from'].full, [])
 		for node in copy.copy(self.presence_expire.get(pres['from'].full, [])):
-			print "***--**--- Attempting to unsubscribe from", node
 			if node in self.nodes:
-				print "***--**--- Really Attempting to unsubscribe from", node
-				#subid = self.nodes[node].subscriptionsbyjid.get(pres['from'].full)
-				#if subid is not None: subid = subid.subid
 				r = self.unsubscribeNode(node, pres['from'].full)
 				logging.debug("Unsubscribing %s from %s because they went offline: %s" % (pres['from'], node, r))
 		if self.presence_expire.has_key(pres['from'].full) and not self.presence_expire[pres['from'].full]:
-			print "jid is empty, remove presence_expire entry"
 			del  self.presence_expire[pres['from'].full]
 	
 	def handlePresenceSubscribe(self, pres):
+		if self.db is None: return
 		ifrom = pres['from'].bare
 		ito = pres['to'].bare
 		subto, subfrom = self.db.getRosterJid(ifrom)
@@ -236,9 +240,10 @@ class PublishSubscribe(object):
 		return default_config
 	
 	def loadNodes(self):
-		if self.config.get('settings', 'node_creation') != 'createonsubscribe':
-			for node, node_type in self.db.getNodes():
-				self.nodes.addNode(node, node_type)
+		if self.config['settings']['node_creation'] != 'createonsubscribe':
+			if self.db is not None:
+				for node, node_type in self.db.getNodes():
+					self.nodes.addNode(node, node_type)
 #[node] = self.node_classes.get(node_type, BaseNode)(self, self.db, node)
 
 	def registerNodeType(self, nodemodule):
@@ -252,7 +257,7 @@ class PublishSubscribe(object):
 		if node in self.nodes:
 			self.nodes[node].delete()
 			self.nodes.deleteNode(node)
-			self.db.deleteNode(node)
+			if self.db is not None: self.db.deleteNode(node)
 			return True
 		else:
 			return False
@@ -303,10 +308,16 @@ class PublishSubscribe(object):
 		iq['type'] = 'result'
 		iq.send()
 	
+
+	def retractItem(self, node, id):
+		node = self.nodes.get(node)
+		if node is None:
+			return False
+		node.deleteItem(id)
+		return True
+
 	def handleRetractItem(self, iq):
-		print "------------------------------------ RETRACT----------"
-		print iq.getStanzaValues()
-		print "--=-=--=-=-=-=-=-=-=-=-==-=-=-=-=-="
+		#TODO should call retract item
 		node = self.nodes.get(iq['pubsub']['retract']['node'])
 		if node is None:
 			iq.reply()
@@ -370,8 +381,8 @@ class PublishSubscribe(object):
 	def createNode(self, node, config=None, who=None, use_db=True):
 		if config is None:
 			config = copy.copy(self.default_config)
-			for option in self.config.options('defaultnodeconfig'):
-				config.field[option].setValue(self.config.get('defaultnodeconfig', option))
+			for option in self.config['defaultnodeconfig']:
+				config.field[option].setValue(self.config['defaultnodeconfig'][option])
 				#config.setValues({option: self.config.get('defaultnodeconfig', option)})
 		else:
 			config = self.default_config.merge(config)
@@ -417,7 +428,7 @@ class PublishSubscribe(object):
 	
 	def subscribeNode(self, node, jid, who=None, to=None):
 		if node not in self.nodes:
-			if self.config.get('settings', 'node_creation') == 'createonsubscribe':
+			if self.config['settings']['node_creation'] == 'createonsubscribe':
 				self.createNode(node, config=None, who=who.full)
 			else:
 				return False
@@ -430,7 +441,9 @@ class PublishSubscribe(object):
 					self.presence_expire[str(jid)] = []
 				self.presence_expire[str(jid)].append(node)
 				print self.presence_expire
-		return self.nodes[node].subscribe(jid.full, who.full, to=to)
+		if who is not None:
+			who = who.full
+		return self.nodes[node].subscribe(jid.full, who, to=to)
 	
 	def handleSubscribe(self, stanza):
 		node = stanza['pubsub']['subscribe']['node']
@@ -468,9 +481,8 @@ class PublishSubscribe(object):
 			self.nodes[node].unsubscribe(jid, who, subid)
 			if self.nodes[node].config.get('pubsub#expire') == 'presence':
 				if jid in self.presence_expire and node in self.presence_expire[jid]:
-					print "------------ unsubscribed", node, jid
 					self.presence_expire[jid].pop(self.presence_expire[jid].index(node))
-			if self.config.get('settings', 'node_creation') == 'createonsubscribe' and not self.nodes[node].subscriptionsbyjid:
+			if self.config['settings']['node_creation'] == 'createonsubscribe' and not self.nodes[node].subscriptionsbyjid:
 				self.deleteNode(node)
 			return True
 		else:

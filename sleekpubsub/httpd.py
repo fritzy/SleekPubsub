@@ -459,7 +459,7 @@ class TestHandler(RestHandler):
 class HTTPD(object):
 	def __init__(self, pubsub):
 		self.pubsub = pubsub
-		self.jid = self.pubsub.config.get('rest', 'userasjid')
+		self.jid = self.pubsub.config['rest']['userasjid']
 		self.rest_handlers = {
 			"default": DefaultHandler(self),
 			"node": NodeHandler(self),
@@ -469,7 +469,7 @@ class HTTPD(object):
 			"affiliation": AffiliationHandler(self),
 			"test": TestHandler(self),
 		}
-		self.httpd = RESTHTTPServer((self.pubsub.config.get('rest', 'server'), self.pubsub.config.getint('rest', 'port')), http_handler, rest_handlers=self.rest_handlers, userpass=(self.pubsub.config.get('rest', 'user'), self.pubsub.config.get('rest', 'passwd')))
+		self.httpd = RESTHTTPServer((self.pubsub.config['rest']['server'], self.pubsub.config['rest']['port']), http_handler, rest_handlers=self.rest_handlers, userpass=(self.pubsub.config['rest']['user'], self.pubsub.config['rest']['passwd']))
 		thread.start_new(self.process_request, tuple())
 	
 	def process_request(self):
