@@ -136,8 +136,8 @@ class PublishSubscribe(object):
 		if self.dbfile is not None:
 			self.db = PubsubDB(self.dbfile, self.xmpp)
 		self.loadNodes()
-		self.createNode('__stats__', config={'pubsub#presence_based_delivery': True}, who=None, use_db=False)
-		self.createNode('__purgatory__', config={'pubsub#presence_based_delivery': True}, who=None, use_db=False)
+		self.createNode('__stats__', config={'pubsub#presence_based_delivery': True, 'pubsub#expire': 'presence'}, who=None, use_db=False)
+		self.createNode('__purgatory__', config={'pubsub#presence_based_delivery': True, 'pubsub#expire': 'presence'}, who=None, use_db=False)
 
 		self.xmpp.schedule('sleekpubsub_generate_stats', 3.0, self.generateStats, repeat=True)
 		if self.db is not None:
@@ -427,16 +427,20 @@ class PublishSubscribe(object):
 		self.xmpp.send(iq)
 	
 	def subscribeNode(self, node, jid, who=None, to=None):
+		print "subscribe node"
 		if node not in self.nodes:
 			if self.config['settings']['node_creation'] == 'createonsubscribe':
 				self.createNode(node, config=None, who=who.full)
 			else:
+				print "no create on subscribe"
 				return False
 		if self.nodes[node].config.get('pubsub#expire') == 'presence':
+			print "presence expire"
 			if not self.xmpp.roster.has_key(jid.bare) or not self.xmpp.roster[jid.bare]['presence'].has_key(jid.resource):
 				print "could not subscribe to pubsub#expire", jid.full, self.xmpp.roster
 				return False
 			else:
+				print "subscribing"
 				if str(jid) not in self.presence_expire:
 					self.presence_expire[str(jid)] = []
 				self.presence_expire[str(jid)].append(node)
