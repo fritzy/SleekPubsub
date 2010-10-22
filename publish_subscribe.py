@@ -144,7 +144,7 @@ if __name__ == '__main__':
 	
 	overridedefault = {}
 	for option in config.options('defaultnodeconfig'):
-		overridedefault[option] = self.config.get('defaultnodeconfig', option)
+		overridedefault[option] = config.get('defaultnodeconfig', option)
 
 	pubsub = sleekpubsub.PublishSubscribe(xmpp, config.get('pubsub', 'dbfile'), settings, rest, overridedefault)
 	#pubsub.registerNodeType(sleekpubsub.jobnode)

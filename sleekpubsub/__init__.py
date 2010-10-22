@@ -101,7 +101,7 @@ class PublishSubscribe(object):
 		if overridedefault is None:
 			self.config['defaultnodeconfig'] = {}
 		else:
-			self.config['defaultnodecofnig'] = overridedefault
+			self.config['defaultnodeconfig'] = overridedefault
 		self.default_config = self.getDefaultConfig()
 		
 		self.admins = []
