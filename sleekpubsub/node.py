@@ -647,7 +647,7 @@ class QueueNode(BaseNode):
 		BaseNode.__init__(self, *args, **kwargs)
 		self.current_event = None
 		self.current_iterator = None
-        	self.last_claim_jid = None
+		self.last_claim_jid = None
 
 	def setState(self, state):
 		super(QueueNode, self).setState(state)
@@ -760,6 +760,7 @@ class JobNode2(QueueNode):
 		self.xmpp.schedule("%s::node_maintenance" % (self.name,),  5, self.maintenance, repeat=True)
 		self.last_update_time = None
 		self.last_update_size = 0
+		self.xmpp.schedule("%s::node_maintenance" % (self.name,),  5, self.maintenance, repeat=True) 
 
 	def setItemState(self, item_id, state, who=None):
 		passed = BaseNode.setItemState(self, item_id, state, who)
@@ -813,7 +814,10 @@ class JobNode2(QueueNode):
 		return item
 
 	def maintenance(self):
-		pass
+		   for item_id in self.itemorder:
+				   if time.time() - self.items[item_id].time > 10.0:
+						   self.pubsub.publish('__purgatory__', self.items[item_id].payload, id="%s::%s" % (self.name, self.items[item_id].name))
+						   self.deleteItem(item_id)
 	
 	def notifyDelete(self, event):
 		pass # we don't notify retracts for job nodes
