@@ -176,9 +176,8 @@ class PublishSubscribe(object):
 
 	def handleGotOffline(self, pres):
 		for node in copy.copy(self.presence_expire.get(pres['from'].full, [])):
-			if node in self.nodes:
-				r = self.unsubscribeNode(node, pres['from'].full)
-				logging.debug("Unsubscribing %s from %s because they went offline: %s" % (pres['from'], node, r))
+			r = self.unsubscribeNode(node, pres['from'].full)
+			logging.debug("Unsubscribing %s from %s because they went offline: %s" % (pres['from'], node, r))
 		if self.presence_expire.has_key(pres['from'].full) and not self.presence_expire[pres['from'].full]:
 			del  self.presence_expire[pres['from'].full]
 	
