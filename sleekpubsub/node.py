@@ -821,6 +821,7 @@ class JobNode2(QueueNode):
 				   if time.time() - self.items[item_id].time > 10.0:
 						   self.pubsub.publish('__purgatory__', self.items[item_id].payload, id="%s::%s" % (self.name, self.items[item_id].name))
 						   self.deleteItem(item_id)
+						   self.notifyItem(None)
 	
 	def notifyDelete(self, event):
 		pass # we don't notify retracts for job nodes
