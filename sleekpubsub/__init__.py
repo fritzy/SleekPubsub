@@ -223,6 +223,7 @@ class PublishSubscribe(object):
 		default_config.addField('pubsub#subscribe', 'boolean', label='Whether to allow subscriptions', value=True)
 		default_config.addField('pubsub#collection', 'text-multi', label="This node in collections")
 		default_config.addField('sleek#saveonchange', 'boolean', label='Save on every change', value=False)
+		default_config.addField('sleek#dupesubscriptions', 'boolean', label='Allow dupe subscriptions', value=True)
 		model = default_config.addField('pubsub#access_model', 'list-single', label='Specify the subscriber model', value='open')
 		#model.addOption('authorize', 'Authorize') # not yet implemented
 		model.addOption('open', 'Open')
