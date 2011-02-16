@@ -351,11 +351,11 @@ class BaseNode(object):
                 resources = self.xmpp.roster.get(barejid, {'presence': {}})['presence'].keys()
                 if resources:
                     for resource in resources:
-                        msg['from'] = self.xmpp.jid
+                        msg['from'] = self.xmpp.boundjid
                         msg['to'] = "%s/%s" % (barejid, resource)
                         msg.send()
                 else:
-                        msg['from'] = self.xmpp.jid
+                        msg['from'] = self.xmpp.boundjid
                         msg['to'] = barejid
                         msg.send()
 
@@ -554,14 +554,13 @@ class BaseNode(object):
         return self.affiliations
     
     def notifyItem(self, event, filterjid=None):
-        print "-------- NOTYF ITEM", self.xmpp.jid, type(self.xmpp.jid)
         if event.hasNode(self.name):
             return False
         event.addNode(self.name)
         jid=''
         msg = self.xmpp.Message()
         msg['to'] = jid
-        msg['from'] = self.xmpp.jid
+        msg['from'] = self.xmpp.boundjid
         xevent = ET.Element('{http://jabber.org/protocol/pubsub#event}event')
         items = ET.Element('items', {'node': event.originalnode})
         for itemi in event.item:
@@ -581,7 +580,7 @@ class BaseNode(object):
             if not event.hasJid(jid):
                 event.addJid(jid)
                 msg['to'] = jid
-                msg['from'] = mto or self.xmpp.jid
+                msg['from'] = mto or self.xmpp.boundjid
                 self.xmpp.send(msg)
         for parent in self.collections:
             if parent in self.pubsub.nodes:
@@ -597,7 +596,7 @@ class BaseNode(object):
         jid=''
         msg = self.xmpp.Message()
         msg['to'] = jid
-        msg['from'] = self.xmpp.jid
+        msg['from'] = self.xmpp.boundjid
 
         xevent = ET.Element('{http://jabber.org/protocol/pubsub#event}event')
         items = ET.Element('items', {'node': event.originalnode})
@@ -612,7 +611,7 @@ class BaseNode(object):
                 event.addJid(jid)
                 msg['to'] = jid
                 print "WHAT THE HELL IS", mto, type(mto)
-                msg['from'] = mto or self.xmpp.jid
+                msg['from'] = mto or self.xmpp.boundjid
                 self.xmpp.send(msg)
         for parent in self.collections:
             if parent in self.pubsub.nodes:
@@ -687,7 +686,7 @@ class QueueNode(BaseNode):
             return
         payload = event.item.payload
         jid=''
-        msg = self.xmpp.makeMessage(mto=jid, mfrom=self.xmpp.jid)
+        msg = self.xmpp.makeMessage(mto=jid, mfrom=self.xmpp.boundjid)
         xevent = ET.Element('{http://jabber.org/protocol/pubsub#event}event')
         items = ET.Element('items', {'node': event.originalnode})
         item = ET.Element('item', {'id': item_id})
@@ -705,7 +704,7 @@ class QueueNode(BaseNode):
             #for step in self.eachSubscriber():
                 #for jid, mto in step:
                 msg.attrib['to'] = jid
-                msg['from'] = mto or self.xmpp.jid
+                msg['from'] = mto or self.xmpp.boundjid
                 self.xmpp.send(msg)
                 #self.xmpp.schedule("%s::%s::bcast" % (self.name, item_id), 0, self._broadcast, tuple())
             self._broadcast()
@@ -803,7 +802,7 @@ class JobNode2(QueueNode):
             msg['pubsub_event']['items']['node'] = self.name
             for step in self.eachSubscriber():
                 for mto, mfrom in step:
-                    msg['from'] = mfrom or self.xmpp.jid
+                    msg['from'] = mfrom or self.xmpp.boundjid
                     msg['to'] = mto
                     msg.send()
     
