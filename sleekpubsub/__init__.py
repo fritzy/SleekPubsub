@@ -16,7 +16,7 @@ import os
 
 class NodeCache(object):
     """Manages nodes in memory, keeping most recently accessed in memory"""
-    def __init__(self, pubsub, limit=100, clearbatch=10):
+    def __init__(self, pubsub, limit=1000, clearbatch=10):
         self.clearbatch = clearbatch
         self.pubsub = pubsub
         self.activenodes = {}
@@ -74,7 +74,7 @@ class NodeCache(object):
     def clearExtra(self):
         while len(self.cache) > self.limit:
             for node in self.cache[:self.clearbatch]:
-                if node.use_db:
+                if self.activenodes[node].use_db:
                     self.clear(node)
     
     def clearAll(self):
