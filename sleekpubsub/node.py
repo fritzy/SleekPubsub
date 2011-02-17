@@ -391,7 +391,10 @@ class BaseNode(object):
 
     def unsubscribe(self, jid, who=None, subid=None):
         if subid is None:
-            subid = self.subscriptionsbyjid[jid].getid()
+            try:
+                subid = self.subscriptionsbyjid[jid].getid()
+            except KeyError:
+                return False
         if self.config['sleek#saveonchange'] and self.use_db:
             self.db.deleteSubscription(self.name, jid, subid)
         try:
